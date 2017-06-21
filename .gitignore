@@ -11,4 +11,3 @@ bin/
 test/
 build/
 .lvimrc
-wayland-*-protocol.*

@@ -41,7 +41,8 @@ struct wlr_surface_impl {
 	void (*destroy)(struct wlr_surface_state *state);
 };
 
-struct wlr_surface *wlr_surface_init();
+struct wlr_surface *wlr_surface_init(struct wlr_surface_state *state,
+		struct wlr_surface_impl *impl);
 void wlr_surface_bind(struct wlr_surface *surface);
 
 #endif
