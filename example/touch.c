@@ -11,13 +11,12 @@
 #include <wayland-server-protocol.h>
 #include <xkbcommon/xkbcommon.h>
 #include <GLES3/gl3.h>
-#include <wlr/common/list.h>
 #include <wlr/render/matrix.h>
 #include <wlr/render/gles3.h>
 #include <wlr/render.h>
 #include <wlr/backend.h>
 #include <wlr/session.h>
-#include <wlr/types.h>
+#include <wlr/util/list.h>
 #include "shared.h"
 #include "cat.h"
 
@@ -53,13 +52,6 @@ static void handle_output_frame(struct output_state *output, struct timespec *ts
 	}
 
 	wlr_renderer_end(sample->renderer);
-}
-
-static void handle_keyboard_key(struct keyboard_state *kbstate,
-		xkb_keysym_t sym, enum wlr_key_state key_state) {
-	if (sym == XKB_KEY_Escape) {
-		kbstate->compositor->exit = true;
-	}
 }
 
 static void handle_touch_down(struct touch_state *tstate, int32_t slot,
@@ -103,7 +95,6 @@ int main(int argc, char *argv[]) {
 	struct compositor_state compositor = { 0,
 		.data = &state,
 		.output_frame_cb = handle_output_frame,
-		.keyboard_key_cb = handle_keyboard_key,
 		.touch_down_cb = handle_touch_down,
 		.touch_up_cb = handle_touch_up,
 		.touch_motion_cb = handle_touch_motion,

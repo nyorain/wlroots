@@ -6,11 +6,9 @@
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
-#include "wlr/common/log.h"
-#include "common/log.h"
+#include <wlr/util/log.h>
 
 static bool colored = true;
-static log_callback_t log_callback = wlr_log_stderr;
 
 static const char *verbosity_colors[] = {
 	[L_SILENT] = "",
@@ -18,10 +16,6 @@ static const char *verbosity_colors[] = {
 	[L_INFO  ] = "\x1B[1;34m",
 	[L_DEBUG ] = "\x1B[1;30m",
 };
-
-void wlr_log_init(log_callback_t callback) {
-	log_callback = callback;
-}
 
 void wlr_log_stderr(log_importance_t verbosity, const char *fmt, va_list args) {
 	// prefix the time to the log message
@@ -48,6 +42,12 @@ void wlr_log_stderr(log_importance_t verbosity, const char *fmt, va_list args) {
 	fprintf(stderr, "\n");
 }
 
+static log_callback_t log_callback = wlr_log_stderr;
+
+void wlr_log_init(log_callback_t callback) {
+	log_callback = callback;
+}
+
 void _wlr_vlog(log_importance_t verbosity, const char *fmt, va_list args) {
 	log_callback(verbosity, fmt, args);
 }
@@ -66,12 +66,12 @@ void _wlr_log(log_importance_t verbosity, const char *fmt, ...) {
 // 'backend/wayland/backend.c'
 const char *_strip_path(const char *filepath) {
 	static int srclen = strlen(WLR_SRC_DIR) + 1;
-	if(*filepath == '.') {
-		while(*filepath == '.' || *filepath == '/') {
+	if (strstr(filepath, WLR_SRC_DIR) == filepath) {
+		filepath += srclen;
+	} else if (*filepath == '.') {
+		while (*filepath == '.' || *filepath == '/') {
 			++filepath;
 		}
-	} else {
-		filepath += srclen;
 	}
 	return filepath;
 }

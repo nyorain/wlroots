@@ -1,11 +1,11 @@
 #ifndef _WLR_BACKEND_LIBINPUT_INTERNAL_H
 #define _WLR_BACKEND_LIBINPUT_INTERNAL_H
 #include <libinput.h>
-#include <wlr/backend/interface.h>
-#include <wlr/common/list.h>
 #include <wayland-server-core.h>
+#include <wlr/backend/interface.h>
+#include <wlr/interfaces/wlr_input_device.h>
+#include <wlr/util/list.h>
 #include "backend/udev.h"
-#include "types.h"
 
 struct wlr_backend_state {
 	struct wlr_backend *backend;
@@ -15,6 +15,8 @@ struct wlr_backend_state {
 
 	struct libinput *libinput;
 	struct wl_event_source *input_event;
+
+	struct wl_listener session_signal;
 
 	list_t *devices;
 };

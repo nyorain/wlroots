@@ -5,6 +5,7 @@
 #include <time.h>
 #include <string.h>
 #include <unistd.h>
+#include <math.h>
 #include <wayland-server.h>
 #include <wayland-server-protocol.h>
 #include <xkbcommon/xkbcommon.h>
@@ -14,8 +15,8 @@
 #include <wlr/render.h>
 #include <wlr/backend.h>
 #include <wlr/session.h>
-#include <wlr/types.h>
-#include <math.h>
+#include <wlr/types/wlr_keyboard.h>
+#include <wlr/util/log.h>
 #include "shared.h"
 #include "cat.h"
 
@@ -46,18 +47,18 @@ static void handle_output_frame(struct output_state *output, struct timespec *ts
 	wlr_renderer_end(sample->renderer);
 }
 
-static void handle_keyboard_key(struct keyboard_state *kbstate,
-		xkb_keysym_t sym, enum wlr_key_state key_state) {
-	if (sym == XKB_KEY_Escape) {
-		kbstate->compositor->exit = true;
-	}
-}
-
 static void handle_pointer_motion(struct pointer_state *pstate,
 		double d_x, double d_y) {
 	struct sample_state *state = pstate->compositor->data;
 	state->cur_x += d_x;
 	state->cur_y += d_y;
+}
+
+static void handle_pointer_motion_absolute(struct pointer_state *pstate,
+		double x, double y) {
+	struct sample_state *state = pstate->compositor->data;
+	state->cur_x = x;
+	state->cur_y = y;
 }
 
 static void handle_pointer_button(struct pointer_state *pstate,
@@ -97,11 +98,11 @@ static void handle_output_add(struct output_state *ostate) {
 	int width = 16, height = 16;
 	if (!wlr_output_set_cursor(wlr_output, cat_tex.pixel_data,
 			width * 4, width, height)) {
-		fprintf(stderr, "Failed to set cursor\n");
+		wlr_log(L_DEBUG, "Failed to set hardware cursor");
 		return;
 	}
 	if (!wlr_output_move_cursor(wlr_output, 0, 0)) {
-		fprintf(stderr, "Failed to move cursor\n");
+		wlr_log(L_DEBUG, "Failed to move hardware cursor");
 	}
 }
 
@@ -114,8 +115,8 @@ int main(int argc, char *argv[]) {
 	compositor.data = &state;
 	compositor.output_add_cb = handle_output_add;
 	compositor.output_frame_cb = handle_output_frame;
-	compositor.keyboard_key_cb = handle_keyboard_key;
 	compositor.pointer_motion_cb = handle_pointer_motion;
+	compositor.pointer_motion_absolute_cb = handle_pointer_motion_absolute;
 	compositor.pointer_button_cb = handle_pointer_button;
 	compositor.pointer_axis_cb = handle_pointer_axis;
 	compositor_init(&compositor);

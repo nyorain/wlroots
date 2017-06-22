@@ -8,7 +8,7 @@
 #include <GLES3/gl3.h>
 #include <wlr/backend.h>
 #include <wlr/session.h>
-#include <wlr/types.h>
+#include <wlr/types/wlr_output.h>
 #include <xkbcommon/xkbcommon.h>
 #include "shared.h"
 
@@ -38,13 +38,6 @@ void handle_output_frame(struct output_state *output, struct timespec *ts) {
 	glClear(GL_COLOR_BUFFER_BIT);
 }
 
-static void handle_keyboard_key(struct keyboard_state *kbstate,
-		xkb_keysym_t sym, enum wlr_key_state key_state) {
-	if (sym == XKB_KEY_Escape) {
-		kbstate->compositor->exit = true;
-	}
-}
-
 int main() {
 	struct sample_state state = {
 		.color = { 1.0, 0.0, 0.0 },
@@ -53,7 +46,6 @@ int main() {
 	struct compositor_state compositor = { 0,
 		.data = &state,
 		.output_frame_cb = handle_output_frame,
-		.keyboard_key_cb = handle_keyboard_key,
 	};
 	compositor_init(&compositor);
 	compositor_run(&compositor);

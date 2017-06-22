@@ -4,11 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wayland-client.h>
-#include <wlr/types.h>
 #include <GLES3/gl3.h>
-#include "types.h"
+#include <wlr/interfaces/wlr_output.h>
+#include <wlr/util/log.h>
 #include "backend/wayland.h"
-#include "common/log.h"
 
 static struct wl_callback_listener frame_listener;
 

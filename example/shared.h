@@ -1,13 +1,16 @@
 #ifndef _EXAMPLE_SHARED_H
 #define _EXAMPLE_SHARED_H
-#define _POSIX_C_SOURCE 199309L
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
 #include <time.h>
 #include <stdbool.h>
 #include <xkbcommon/xkbcommon.h>
 #include <wayland-server-protocol.h>
 #include <wlr/backend.h>
 #include <wlr/session.h>
-#include <wlr/types.h>
+#include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_input_device.h>
 
 struct output_state {
 	struct compositor_state *compositor;
@@ -80,6 +83,8 @@ struct compositor_state {
 			enum wlr_key_state key_state);
 	void (*pointer_motion_cb)(struct pointer_state *s,
 			double d_x, double d_y);
+	void (*pointer_motion_absolute_cb)(struct pointer_state *s,
+			double x, double y);
 	void (*pointer_button_cb)(struct pointer_state *s,
 			uint32_t button, enum wlr_button_state state);
 	void (*pointer_axis_cb)(struct pointer_state *s,
@@ -93,7 +98,7 @@ struct compositor_state {
 	void (*touch_up_cb)(struct touch_state *s, int32_t slot);
 	void (*touch_cancel_cb)(struct touch_state *s, int32_t slot);
 	void (*tool_axis_cb)(struct tablet_tool_state *s,
-			struct wlr_tablet_tool_axis *event);
+			struct wlr_event_tablet_tool_axis *event);
 	void (*tool_proximity_cb)(struct tablet_tool_state *s,
 			enum wlr_tablet_tool_proximity_state proximity);
 	void (*tool_tip_cb)(struct tablet_tool_state *s,

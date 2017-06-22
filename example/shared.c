@@ -1,4 +1,4 @@
-#define _POSIX_C_SOURCE 199309L
+#define _POSIX_C_SOURCE 200112L
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -9,7 +9,9 @@
 #include <wayland-server-protocol.h>
 #include <wlr/backend.h>
 #include <wlr/session.h>
-#include <wlr/types.h>
+#include <wlr/types/wlr_output.h>
+#include <wlr/types/wlr_input_device.h>
+#include <wlr/util/log.h>
 #include "shared.h"
 
 static void keyboard_led_update(struct keyboard_state *kbstate) {
@@ -23,7 +25,7 @@ static void keyboard_led_update(struct keyboard_state *kbstate) {
 }
 
 static void keyboard_key_notify(struct wl_listener *listener, void *data) {
-	struct wlr_keyboard_key *event = data;
+	struct wlr_event_keyboard_key *event = data;
 	struct keyboard_state *kbstate = wl_container_of(listener, kbstate, key);
 	uint32_t keycode = event->keycode + 8;
 	enum wlr_key_state key_state = event->state;
@@ -34,11 +36,16 @@ static void keyboard_key_notify(struct wl_listener *listener, void *data) {
 		char name[64];
 		int l = xkb_keysym_get_name(sym, name, sizeof(name));
 		if (l != -1 && l != sizeof(name)) {
-			fprintf(stderr, "Key event: %s %s\n", name,
+			wlr_log(L_DEBUG, "Key event: %s %s", name,
 					key_state == WLR_KEY_PRESSED ? "pressed" : "released");
 		}
 		if (kbstate->compositor->keyboard_key_cb) {
 			kbstate->compositor->keyboard_key_cb(kbstate, sym, key_state);
+		}
+		if (sym == XKB_KEY_Escape) {
+			wl_display_terminate(kbstate->compositor->display);
+		} else if (key_state == WLR_KEY_PRESSED && sym >= XKB_KEY_F1 && sym <= XKB_KEY_F12) {
+			wlr_session_change_vt(kbstate->compositor->session, sym - XKB_KEY_F1 + 1);
 		}
 	}
 	xkb_state_update_key(kbstate->xkb_state, keycode,
@@ -64,19 +71,19 @@ static void keyboard_add(struct wlr_input_device *device, struct compositor_stat
 	rules.options = getenv("XKB_DEFAULT_OPTIONS");
 	struct xkb_context *context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
 	if (!context) {
-		fprintf(stderr, "Failed to create XKB context\n");
+		wlr_log(L_ERROR, "Failed to create XKB context");
 		exit(1);
 	}
 	kbstate->keymap = xkb_map_new_from_names(
 			context, &rules, XKB_KEYMAP_COMPILE_NO_FLAGS);
 	if (!kbstate->keymap) {
-		fprintf(stderr, "Failed to create XKB keymap\n");
+		wlr_log(L_ERROR, "Failed to create XKB keymap");
 		exit(1);
 	}
 	xkb_context_unref(context);
 	kbstate->xkb_state = xkb_state_new(kbstate->keymap);
 	if (!kbstate->xkb_state) {
-		fprintf(stderr, "Failed to create XKB state\n");
+		wlr_log(L_ERROR, "Failed to create XKB state");
 		exit(1);
 	}
 	const char *led_names[3] = {
@@ -90,7 +97,7 @@ static void keyboard_add(struct wlr_input_device *device, struct compositor_stat
 }
 
 static void pointer_motion_notify(struct wl_listener *listener, void *data) {
-	struct wlr_pointer_motion *event = data;
+	struct wlr_event_pointer_motion *event = data;
 	struct pointer_state *pstate = wl_container_of(listener, pstate, motion);
 	if (pstate->compositor->pointer_motion_cb) {
 		pstate->compositor->pointer_motion_cb(pstate,
@@ -98,8 +105,17 @@ static void pointer_motion_notify(struct wl_listener *listener, void *data) {
 	}
 }
 
+static void pointer_motion_absolute_notify(struct wl_listener *listener, void *data) {
+	struct wlr_event_pointer_motion_absolute *event = data;
+	struct pointer_state *pstate = wl_container_of(listener, pstate, motion_absolute);
+	if (pstate->compositor->pointer_motion_absolute_cb) {
+		pstate->compositor->pointer_motion_absolute_cb(pstate,
+				event->x_mm, event->y_mm);
+	}
+}
+
 static void pointer_button_notify(struct wl_listener *listener, void *data) {
-	struct wlr_pointer_button *event = data;
+	struct wlr_event_pointer_button *event = data;
 	struct pointer_state *pstate = wl_container_of(listener, pstate, button);
 	if (pstate->compositor->pointer_button_cb) {
 		pstate->compositor->pointer_button_cb(pstate,
@@ -108,7 +124,7 @@ static void pointer_button_notify(struct wl_listener *listener, void *data) {
 }
 
 static void pointer_axis_notify(struct wl_listener *listener, void *data) {
-	struct wlr_pointer_axis *event = data;
+	struct wlr_event_pointer_axis *event = data;
 	struct pointer_state *pstate = wl_container_of(listener, pstate, axis);
 	if (pstate->compositor->pointer_axis_cb) {
 		pstate->compositor->pointer_axis_cb(pstate,
@@ -125,16 +141,18 @@ static void pointer_add(struct wlr_input_device *device, struct compositor_state
 	wl_list_init(&pstate->button.link);
 	wl_list_init(&pstate->axis.link);
 	pstate->motion.notify = pointer_motion_notify;
+	pstate->motion_absolute.notify = pointer_motion_absolute_notify;
 	pstate->button.notify = pointer_button_notify;
 	pstate->axis.notify = pointer_axis_notify;
 	wl_signal_add(&device->pointer->events.motion, &pstate->motion);
+	wl_signal_add(&device->pointer->events.motion_absolute, &pstate->motion_absolute);
 	wl_signal_add(&device->pointer->events.button, &pstate->button);
 	wl_signal_add(&device->pointer->events.axis, &pstate->axis);
 	wl_list_insert(&state->pointers, &pstate->link);
 }
 
 static void touch_down_notify(struct wl_listener *listener, void *data) {
-	struct wlr_touch_down *event = data;
+	struct wlr_event_touch_down *event = data;
 	struct touch_state *tstate = wl_container_of(listener, tstate, down);
 	if (tstate->compositor->touch_down_cb) {
 		tstate->compositor->touch_down_cb(tstate, event->slot,
@@ -143,7 +161,7 @@ static void touch_down_notify(struct wl_listener *listener, void *data) {
 }
 
 static void touch_motion_notify(struct wl_listener *listener, void *data) {
-	struct wlr_touch_motion *event = data;
+	struct wlr_event_touch_motion *event = data;
 	struct touch_state *tstate = wl_container_of(listener, tstate, motion);
 	if (tstate->compositor->touch_motion_cb) {
 		tstate->compositor->touch_motion_cb(tstate, event->slot,
@@ -152,7 +170,7 @@ static void touch_motion_notify(struct wl_listener *listener, void *data) {
 }
 
 static void touch_up_notify(struct wl_listener *listener, void *data) {
-	struct wlr_touch_up *event = data;
+	struct wlr_event_touch_up *event = data;
 	struct touch_state *tstate = wl_container_of(listener, tstate, up);
 	if (tstate->compositor->touch_up_cb) {
 		tstate->compositor->touch_up_cb(tstate, event->slot);
@@ -160,7 +178,7 @@ static void touch_up_notify(struct wl_listener *listener, void *data) {
 }
 
 static void touch_cancel_notify(struct wl_listener *listener, void *data) {
-	struct wlr_touch_cancel *event = data;
+	struct wlr_event_touch_cancel *event = data;
 	struct touch_state *tstate = wl_container_of(listener, tstate, cancel);
 	if (tstate->compositor->touch_cancel_cb) {
 		tstate->compositor->touch_cancel_cb(tstate, event->slot);
@@ -187,7 +205,7 @@ static void touch_add(struct wlr_input_device *device, struct compositor_state *
 }
 
 static void tablet_tool_axis_notify(struct wl_listener *listener, void *data) {
-	struct wlr_tablet_tool_axis *event = data;
+	struct wlr_event_tablet_tool_axis *event = data;
 	struct tablet_tool_state *tstate = wl_container_of(listener, tstate, axis);
 	if (tstate->compositor->tool_axis_cb) {
 		tstate->compositor->tool_axis_cb(tstate, event);
@@ -195,7 +213,7 @@ static void tablet_tool_axis_notify(struct wl_listener *listener, void *data) {
 }
 
 static void tablet_tool_proximity_notify(struct wl_listener *listener, void *data) {
-	struct wlr_tablet_tool_proximity *event = data;
+	struct wlr_event_tablet_tool_proximity *event = data;
 	struct tablet_tool_state *tstate = wl_container_of(listener, tstate, proximity);
 	if (tstate->compositor->tool_proximity_cb) {
 		tstate->compositor->tool_proximity_cb(tstate, event->state);
@@ -203,7 +221,7 @@ static void tablet_tool_proximity_notify(struct wl_listener *listener, void *dat
 }
 
 static void tablet_tool_button_notify(struct wl_listener *listener, void *data) {
-	struct wlr_tablet_tool_button *event = data;
+	struct wlr_event_tablet_tool_button *event = data;
 	struct tablet_tool_state *tstate = wl_container_of(listener, tstate, button);
 	if (tstate->compositor->tool_button_cb) {
 		tstate->compositor->tool_button_cb(tstate, event->button, event->state);
@@ -231,7 +249,7 @@ static void tablet_tool_add(struct wlr_input_device *device,
 }
 
 static void tablet_pad_button_notify(struct wl_listener *listener, void *data) {
-	struct wlr_tablet_pad_button *event = data;
+	struct wlr_event_tablet_pad_button *event = data;
 	struct tablet_pad_state *pstate = wl_container_of(listener, pstate, button);
 	if (pstate->compositor->pad_button_cb) {
 		pstate->compositor->pad_button_cb(pstate, event->button, event->state);
@@ -301,7 +319,7 @@ static void pointer_remove(struct wlr_input_device *device, struct compositor_st
 	}
 	wl_list_remove(&pstate->link);
 	wl_list_remove(&pstate->motion.link);
-	//wl_list_remove(&pstate->motion_absolute.link);
+	wl_list_remove(&pstate->motion_absolute.link);
 	wl_list_remove(&pstate->button.link);
 	wl_list_remove(&pstate->axis.link);
 }
@@ -380,8 +398,8 @@ static void output_frame_notify(struct wl_listener *listener, void *data) {
 static void output_add_notify(struct wl_listener *listener, void *data) {
 	struct wlr_output *output = data;
 	struct compositor_state *state = wl_container_of(listener, state, output_add);
-	fprintf(stderr, "Output '%s' added\n", output->name);
-	fprintf(stderr, "%s %s %"PRId32"mm x %"PRId32"mm\n", output->make, output->model,
+	wlr_log(L_DEBUG, "Output '%s' added", output->name);
+	wlr_log(L_DEBUG, "%s %s %"PRId32"mm x %"PRId32"mm", output->make, output->model,
 		output->phys_width, output->phys_height);
 	if (output->modes->length > 0) {
 		wlr_output_set_mode(output, output->modes->items[0]);
@@ -458,17 +476,17 @@ void compositor_init(struct compositor_state *state) {
 
 	clock_gettime(CLOCK_MONOTONIC, &state->last_frame);
 
+	const char *socket = wl_display_add_socket_auto(state->display);
+	wlr_log(L_INFO, "Running compositor on wayland display '%s'", socket);
+	setenv("_WAYLAND_DISPLAY", socket, true);
 	if (!wlr_backend_init(state->backend)) {
-		fprintf(stderr, "Failed to initialize backend\n");
+		wlr_log(L_ERROR, "Failed to initialize backend");
 		exit(1);
 	}
 }
 
 void compositor_run(struct compositor_state *state) {
-	while (!state->exit) {
-		wl_event_loop_dispatch(state->event_loop, 0);
-	}
-
+	wl_display_run(state->display);
 	wlr_backend_destroy(state->backend);
 	wlr_session_finish(state->session);
 	wl_display_destroy(state->display);

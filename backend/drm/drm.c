@@ -13,9 +13,9 @@
 #include <GLES3/gl3.h>
 #include <wayland-server.h>
 #include <wlr/backend/interface.h>
+#include <wlr/interfaces/wlr_output.h>
+#include <wlr/util/log.h>
 #include "backend/drm.h"
-#include "common/log.h"
-#include "types.h"
 
 static const char *conn_name[] = {
 	[DRM_MODE_CONNECTOR_Unknown]     = "Unknown",
@@ -114,6 +114,21 @@ static void wlr_drm_output_end(struct wlr_output_state *output) {
 
 	output->bo[1] = output->bo[0];
 	output->bo[0] = bo;
+}
+
+void wlr_drm_output_pause_renderer(struct wlr_output_state *output) {
+	if (output->state != DRM_OUTPUT_CONNECTED) {
+		return;
+	}
+
+	if (output->bo[1]) {
+		gbm_surface_release_buffer(output->gbm, output->bo[1]);
+		output->bo[1] = NULL;
+	}
+	if (output->bo[0]) {
+		gbm_surface_release_buffer(output->gbm, output->bo[0]);
+		output->bo[0] = NULL;
+	}
 }
 
 void wlr_drm_output_start_renderer(struct wlr_output_state *output) {
@@ -608,7 +623,7 @@ static void page_flip_handler(int fd, unsigned seq,
 	}
 
 	output->pageflip_pending = false;
-	if (output->state == DRM_OUTPUT_CONNECTED) {
+	if (output->state == DRM_OUTPUT_CONNECTED && state->session->active) {
 		wlr_drm_output_begin(output);
 		wl_signal_emit(&output->wlr_output->events.frame, output->wlr_output);
 		wlr_drm_output_end(output);

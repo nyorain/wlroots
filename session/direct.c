@@ -7,7 +7,7 @@
 #include <unistd.h>
 #include <wayland-server.h>
 #include <wlr/session/interface.h>
-#include "common/log.h"
+#include <wlr/util/log.h>
 
 const struct session_impl session_direct;
 
@@ -45,8 +45,8 @@ static struct wlr_session *direct_session_start(struct wl_display *disp) {
 	wlr_log(L_INFO, "Successfully loaded direct session");
 
 	session->base.impl = &session_direct;
-	wl_signal_init(&session->base.device_paused);
-	wl_signal_init(&session->base.device_resumed);
+	session->base.active = true;
+	wl_signal_init(&session->base.session_signal);
 	return &session->base;
 }
 

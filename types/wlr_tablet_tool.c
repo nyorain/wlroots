@@ -1,9 +1,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <wayland-server.h>
-#include <wlr/types.h>
-#include <wlr/common/list.h>
-#include "types.h"
+#include <wlr/types/wlr_tablet_tool.h>
+#include <wlr/interfaces/wlr_tablet_tool.h>
 
 struct wlr_tablet_tool *wlr_tablet_tool_create(struct wlr_tablet_tool_impl *impl,
 		struct wlr_tablet_tool_state *state) {

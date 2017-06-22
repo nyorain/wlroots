@@ -15,7 +15,7 @@
 #include <wlr/render.h>
 #include <wlr/backend.h>
 #include <wlr/session.h>
-#include <wlr/types.h>
+#include <wlr/types/wlr_keyboard.h>
 #include <math.h>
 #include "shared.h"
 #include "cat.h"
@@ -107,9 +107,6 @@ static void handle_keyboard_key(struct keyboard_state *kbstate,
 	// Also, key repeat
 	if (key_state == WLR_KEY_PRESSED) {
 		switch (sym) {
-		case XKB_KEY_Escape:
-			kbstate->compositor->exit = true;
-			break;
 		case XKB_KEY_Left:
 			update_velocities(kbstate->compositor, -16, 0);
 			break;
