@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <GLES2/gl2.h>
 #include <wlr/render.h>
+#include <wlr/log.h>
 
 struct wlr_render_state {
 	struct wlr_egl *egl;
@@ -31,10 +32,6 @@ struct shaders {
 	GLuint ellipse;
 };
 
-struct wlr_output_render_state {
-	EGLSurface surface;
-};
-
 struct wlr_surface *gles2_surface_init(wlr_render_state *renderer);
 extern struct shaders shaders;
 
@@ -49,7 +46,7 @@ extern const GLchar fragment_src_rgbx[];
 
 bool _gles2_flush_errors(const char *file, int line);
 #define gles2_flush_errors(...) \
-	_gles2_flush_errors(__FILE__ + strlen(WLR_SRC_DIR) + 1, __LINE__)
+	_gles2_flush_errors(_strip_path(strlen(WLR_SRC_DIR)), __LINE__)
 
 #define GL_CALL(func) func; gles2_flush_errors()
 

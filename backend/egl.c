@@ -42,10 +42,10 @@ const char *egl_error(void) {
 	}
 }
 
-// EGL extensions
 PFNEGLGETPLATFORMDISPLAYEXTPROC get_platform_display;
 PFNEGLCREATEPLATFORMWINDOWSURFACEEXTPROC create_platform_window_surface;
 
+// EGL extensions
 static bool egl_exts() {
 	get_platform_display = (PFNEGLGETPLATFORMDISPLAYEXTPROC)
 		eglGetProcAddress("eglGetPlatformDisplayEXT");
@@ -109,7 +109,8 @@ static bool egl_get_config(EGLDisplay disp, EGLConfig *out, EGLenum platform) {
 	return false;
 }
 
-bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *display) {
+bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform,
+		void *remote_display, struct wl_display *local_display) {
 	if (!egl_exts()) {
 		return false;
 	}
@@ -119,7 +120,7 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *display) {
 		goto error;
 	}
 
-	egl->display = get_platform_display(platform, display, NULL);
+	egl->display = get_platform_display(platform, remote_display, NULL);
 	if (egl->display == EGL_NO_DISPLAY) {
 		wlr_log(L_ERROR, "Failed to create EGL display: %s", egl_error());
 		goto error;
@@ -147,9 +148,28 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform, void *display) {
 	}
 
 	eglMakeCurrent(egl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl->context);
+	const char* extensions = eglQueryString(egl->display, EGL_EXTENSIONS);
+	if (strstr(extensions, "EGL_WL_bind_wayland_display") == NULL ||
+		strstr(extensions, "EGL_KHR_image_base") == NULL) {
+		wlr_log(L_ERROR, "Required egl extensions not supported");
+		goto error;
+	}
+
+	egl->api.create_image = (void*) eglGetProcAddress("eglCreateImageKHR");
+    egl->api.destroy_image = (void*) eglGetProcAddress("eglDestroyImageKHR");
+    egl->api.bind_wayland_display = (void*) eglGetProcAddress("eglBindWaylandDisplayWL");
+    egl->api.unbind_wayland_display = (void*) eglGetProcAddress("eglUnbindWaylandDisplayWL");
+    egl->api.query_wayland_buffer = (void*) eglGetProcAddress("eglQueryWaylandBufferWL");
+
+	if (egl->api.bind_wayland_display(egl->display, local_display) == EGL_FALSE) {
+		wlr_log(L_ERROR, "Failed to bind wayland display: %s", egl_error());
+		goto error;
+	}
+
+	egl->wl_display = local_display;
+
 	wlr_log(L_INFO, "Using EGL %d.%d", (int)major, (int)minor);
-	wlr_log(L_INFO, "Supported EGL extensions: %s", eglQueryString(egl->display,
-		EGL_EXTENSIONS));
+	wlr_log(L_INFO, "Supported EGL extensions: %s", extensions);
 	wlr_log(L_INFO, "Using %s", glGetString(GL_VERSION));
 	wlr_log(L_INFO, "Supported OpenGL ES extensions: %s", glGetString(GL_EXTENSIONS));
 	return true;
@@ -162,6 +182,7 @@ error:
 }
 
 void wlr_egl_free(struct wlr_egl *egl) {
+	egl->api.unbind_wayland_display(egl->display, egl->wl_display);
 	eglDestroyContext(egl->display, egl->context);
 	eglTerminate(egl->display);
 	eglReleaseThread();

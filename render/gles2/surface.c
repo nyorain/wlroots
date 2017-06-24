@@ -31,6 +31,36 @@ static bool gles2_surface_attach_pixels(struct wlr_surface_state *surface,
 	return true;
 }
 
+static bool gles3_surface_attach_shm(struct wlr_surface_state *surface,
+		uint32_t format, struct wl_shm_buffer *shm) {
+	uint32_t width = wl_shm_buffer_get_width(shm);
+	uint32_t height = wl_shm_buffer_get_height(shm);
+	uint32_t stride = wl_shm_buffer_get_stride(shm);
+
+	surface->wlr_surface->width = width;
+	surface->wlr_surface->height = height;
+	surface->wlr_surface->format = format;
+	GL_CALL(glGenTextures(1, &surface->tex_id));
+	GL_CALL(glBindTexture(GL_TEXTURE_2D, surface->tex_id));
+	GL_CALL(glPixelStorei(GL_UNPACK_ROW_LENGTH, stride));
+
+	wl_shm_buffer_begin_access(shm);
+	void *pixels = wl_shm_buffer_get_data(shm);
+	GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0,
+			format, GL_UNSIGNED_BYTE, pixels));
+	wl_shm_buffer_end_access(shm);
+
+	surface->wlr_surface->valid = true;
+	return true;
+}
+
+static bool gles2_surface_attach_drm(struct wlr_surface_state *state,
+		struct wl_buffer* buf) {
+	// state->
+}
+
+static void gles3_surface_get_matrix(struct wlr_surface_state *surface,
+
 static void gles2_surface_get_matrix(struct wlr_surface_state *surface,
 		float (*matrix)[16], const float (*projection)[16], int x, int y) {
 	struct wlr_surface *_surface = surface->wlr_surface;
@@ -58,7 +88,8 @@ static void gles2_surface_destroy(struct wlr_surface_state *surface) {
 
 static struct wlr_surface_impl wlr_surface_impl = {
 	.attach_pixels = gles2_surface_attach_pixels,
-	// .attach_shm = TODO
+	.attach_shm = gles2_surface_attach_shm,
+	.attach_drm = gles2_surface_attach_drm,
 	.get_matrix = gles2_surface_get_matrix,
 	.bind = gles2_surface_bind,
 	.destroy = gles2_surface_destroy,

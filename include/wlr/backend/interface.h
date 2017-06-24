@@ -12,6 +12,6 @@ struct wlr_backend_impl {
 };
 
 struct wlr_backend *wlr_backend_create(const struct wlr_backend_impl *impl,
-		struct wlr_backend_state *state);
+	struct wlr_backend_state *state);
 
 #endif
