@@ -34,7 +34,7 @@ struct wlr_surface_impl {
 		int width, int height, const unsigned char *pixels);
 	bool (*attach_shm)(struct wlr_surface_state *state, uint32_t format,
 		struct wl_shm_buffer *shm);
-	// TODO: egl
+	bool (*attach_buffer)(struct wlr_surface_state *state, struct wl_buffer* buf);
 	void (*get_matrix)(struct wlr_surface_state *state,
 			float (*matrix)[16], const float (*projection)[16], int x, int y);
 	void (*bind)(struct wlr_surface_state *state);

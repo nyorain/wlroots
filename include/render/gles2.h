@@ -6,12 +6,21 @@
 #include <GLES2/gl2.h>
 #include <wlr/render.h>
 
+struct wlr_render_state {
+	struct wlr_egl *egl;
+};
+
 struct wlr_surface_state {
 	struct wlr_surface *wlr_surface;
+	struct wlr_render_state *renderer;
 	GLuint tex_id;
 };
 
-struct wlr_surface *gles2_surface_init();
+struct wlr_output_render_state {
+	EGLSurface surface;
+};
+
+struct wlr_surface *gles2_surface_init(wlr_render_state *renderer);
 
 extern const GLchar quad_vertex_src[];
 extern const GLchar quad_fragment_src[];
