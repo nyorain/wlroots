@@ -17,7 +17,7 @@ static void pointer_handle_enter(void *data, struct wl_pointer *wl_pointer,
 		wl_fixed_t surface_y) {
 	struct wlr_input_device *dev = data;
 	assert(dev && dev->pointer && dev->pointer->state);
-	struct wlr_output* output = wlr_wl_output_for_surface(dev->state->backend,
+	struct wlr_output *output = wlr_wl_output_for_surface(dev->state->backend,
 			surface);
 
 	if (!output) {
@@ -41,7 +41,7 @@ static void pointer_handle_motion(void *data, struct wl_pointer *wl_pointer,
 	assert(dev && dev->pointer && dev->pointer->state);
 	struct wlr_pointer_state *state = dev->pointer->state;
 
-	if(!state->current_output) {
+	if (!state->current_output) {
 		wlr_log(L_ERROR, "pointer motion event without current output");
 		return;
 	}

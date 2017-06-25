@@ -44,7 +44,10 @@ static void wlr_wl_output_transform(struct wlr_output_state *output,
 }
 
 static void wlr_wl_output_destroy(struct wlr_output_state *output) {
-	if(output->frame_callback) wl_callback_destroy(output->frame_callback);
+	if (output->frame_callback) {
+		wl_callback_destroy(output->frame_callback);
+	}
+
 	eglDestroySurface(output->backend->egl.display, output->surface);
 	wl_egl_window_destroy(output->egl_window);
 	wl_shell_surface_destroy(output->shell_surface);
@@ -57,7 +60,7 @@ static struct wlr_output_impl output_impl = {
 	.destroy = wlr_wl_output_destroy,
 };
 
-void handle_ping(void* data, struct wl_shell_surface* ssurface, uint32_t serial) {
+void handle_ping(void *data, struct wl_shell_surface *ssurface, uint32_t serial) {
 	struct wlr_output_state *output = data;
 	assert(output && output->shell_surface == ssurface);
 	wl_shell_surface_pong(ssurface, serial);

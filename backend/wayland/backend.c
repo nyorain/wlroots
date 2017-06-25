@@ -107,7 +107,7 @@ struct wlr_output *wlr_wl_output_for_surface(struct wlr_backend_state *backend,
 	struct wl_surface *surface) {
 	for (size_t i = 0; i < backend->outputs->length; ++i) {
 		struct wlr_output *output = backend->outputs->items[i];
-		if(output->state->surface == surface)
+		if (output->state->surface == surface)
 			return output;
 	}
 

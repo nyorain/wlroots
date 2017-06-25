@@ -196,7 +196,7 @@ error:
 }
 
 void wlr_egl_free(struct wlr_egl *egl) {
-	if(egl->wl_display && egl->api->eglUnbindWaylandDisplayWL)
+	if (egl->wl_display && egl->api->eglUnbindWaylandDisplayWL)
 		egl->api->eglUnbindWaylandDisplayWL(egl->display, egl->wl_display);
 
 	eglDestroyContext(egl->display, egl->context);
@@ -207,7 +207,7 @@ void wlr_egl_free(struct wlr_egl *egl) {
 }
 
 bool wlr_egl_bind_display(struct wlr_egl *egl, struct wl_display *local_display) {
-	if(!egl->api->eglQueryWaylandBufferWL) {
+	if (!egl->api->eglQueryWaylandBufferWL) {
 		return false;
 	}
 
@@ -217,7 +217,7 @@ bool wlr_egl_bind_display(struct wlr_egl *egl, struct wl_display *local_display)
 
 bool wlr_egl_query_buffer(struct wlr_egl *egl, struct wl_resource *buf, int attrib,
 		int *value) {
-	if(!egl->api->eglQueryWaylandBufferWL) {
+	if (!egl->api->eglQueryWaylandBufferWL) {
 		return false;
 	}
 
