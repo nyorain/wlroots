@@ -14,6 +14,16 @@
 #include "render/gles2.h"
 #include "backend/egl.h"
 
+static void gles2_surface_gen_texture(struct wlr_surface_state *surface) {
+	if (surface->tex_id)
+		return;
+
+	GL_CALL(glGenTextures(1, &surface->tex_id));
+	GL_CALL(glBindTexture(GL_TEXTURE_2D, surface->tex_id));
+	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+	GL_CALL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+}
+
 static bool gles2_surface_attach_pixels(struct wlr_surface_state *surface,
 		enum wl_shm_format format, int width, int height,
 		const unsigned char *pixels) {
@@ -27,7 +37,8 @@ static bool gles2_surface_attach_pixels(struct wlr_surface_state *surface,
 	surface->wlr_surface->height = height;
 	surface->wlr_surface->format = format;
 	surface->pixel_format = fmt;
-	GL_CALL(glGenTextures(1, &surface->tex_id));
+
+	gles2_surface_gen_texture(surface);
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, surface->tex_id));
 	GL_CALL(glTexImage2D(GL_TEXTURE_2D, 0, fmt->gl_format, width, height, 0,
 			fmt->gl_format, fmt->gl_type, pixels));
@@ -51,7 +62,7 @@ static bool gles2_surface_attach_shm(struct wlr_surface_state *surface,
 		return false;
   	}
 
-	GL_CALL(glGenTextures(1, &surface->tex_id));
+	gles2_surface_gen_texture(surface);
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, surface->tex_id));
 
 	// TODO: try to achieve this without gl extensions?
@@ -96,7 +107,7 @@ static bool gles2_surface_attach_drm(struct wlr_surface_state *surface,
 		return false;
    }
 
-	GL_CALL(glGenTextures(1, &surface->tex_id));
+	gles2_surface_gen_texture(surface);
 	GL_CALL(glBindTexture(GL_TEXTURE_2D, surface->tex_id));
 
 	EGLint attribs[] = { EGL_WAYLAND_PLANE_WL, 0, EGL_NONE };
@@ -133,7 +144,12 @@ static void gles2_surface_bind(struct wlr_surface_state *surface) {
 }
 
 static void gles2_surface_destroy(struct wlr_surface_state *surface) {
-	GL_CALL(glDeleteTextures(1, &surface->tex_id));
+	if (surface->tex_id)
+		GL_CALL(glDeleteTextures(1, &surface->tex_id));
+
+	if (surface->image)
+		wlr_egl_destroy_image(surface->renderer->egl, surface->image);
+
 	free(surface);
 }
 
