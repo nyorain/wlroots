@@ -202,7 +202,7 @@ int main(int argc, char *argv[]) {
 	compositor.keyboard_key_cb = handle_keyboard_key;
 	compositor_init(&compositor);
 
-	state.renderer = wlr_gles2_renderer_init();
+	state.renderer = wlr_gles2_renderer_init(compositor.backend->egl);
 	state.cat_texture = wlr_render_surface_init(state.renderer);
 	wlr_surface_attach_pixels(state.cat_texture, WL_SHM_FORMAT_ABGR8888,
 		cat_tex.width, cat_tex.height, cat_tex.pixel_data);

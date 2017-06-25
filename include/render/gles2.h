@@ -4,11 +4,15 @@
 #include <string.h>
 #include <stdbool.h>
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <wlr/util/log.h>
 #include <wlr/render.h>
-#include <wlr/log.h>
 
-struct wlr_render_state {
+struct wlr_renderer_state {
 	struct wlr_egl *egl;
+	PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
 };
 
 struct pixel_format {
@@ -20,9 +24,10 @@ struct pixel_format {
 
 struct wlr_surface_state {
 	struct wlr_surface *wlr_surface;
-	struct wlr_render_state *renderer;
-	GLuint tex_id;
+	struct wlr_renderer_state *renderer;
 	const struct pixel_format *pixel_format;
+	GLuint tex_id;
+	EGLImageKHR image;
 };
 
 struct shaders {
@@ -32,7 +37,7 @@ struct shaders {
 	GLuint ellipse;
 };
 
-struct wlr_surface *gles2_surface_init(wlr_render_state *renderer);
+struct wlr_surface *gles2_surface_init(struct wlr_renderer_state *renderer);
 extern struct shaders shaders;
 
 const struct pixel_format *gl_format_for_wl_format(enum wl_shm_format fmt);
@@ -46,7 +51,7 @@ extern const GLchar fragment_src_rgbx[];
 
 bool _gles2_flush_errors(const char *file, int line);
 #define gles2_flush_errors(...) \
-	_gles2_flush_errors(_strip_path(strlen(WLR_SRC_DIR)), __LINE__)
+	_gles2_flush_errors(_strip_path(__FILE__), __LINE__)
 
 #define GL_CALL(func) func; gles2_flush_errors()
 

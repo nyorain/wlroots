@@ -2,12 +2,15 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <EGL/egl.h>
 #include <wayland-util.h>
 #include <wayland-server-protocol.h>
 #include <wlr/render.h>
 #include <wlr/render/interface.h>
 #include <wlr/render/matrix.h>
 #include <wlr/util/log.h>
+#include "backend/egl.h"
 #include "render/gles2.h"
 
 struct shaders shaders;
@@ -92,7 +95,7 @@ static void wlr_gles2_end(struct wlr_renderer_state *state) {
 }
 
 static struct wlr_surface *wlr_gles2_surface_init(struct wlr_renderer_state *state) {
-	return gles2_surface_init();
+	return gles2_surface_init(state);
 }
 
 static void draw_quad() {
@@ -175,7 +178,25 @@ static struct wlr_renderer_impl wlr_renderer_impl = {
 	.destroy = wlr_gles2_destroy
 };
 
-struct wlr_renderer *wlr_gles2_renderer_init() {
+struct wlr_renderer *wlr_gles2_renderer_init(struct wlr_egl *egl) {
 	init_globals();
-	return wlr_renderer_init(NULL, &wlr_renderer_impl);
+	struct wlr_renderer_state *state;
+	if (!(state = calloc(1, sizeof(*state)))) {
+		wlr_log_errno(L_ERROR, "Allocation failed");
+		return NULL;
+	}
+
+	if (strstr(egl->gl_exts, "GL_OES_EGL_image_external")) {
+ 		state->glEGLImageTargetTexture2DOES = (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)
+			eglGetProcAddress("glEGLImageTargetTexture2DOES");
+
+		if (!state->glEGLImageTargetTexture2DOES) {
+			wlr_log(L_ERROR, "Failed to load glEGLImageTargetTexture2DOES");
+		}
+	} else {
+		wlr_log(L_ERROR, "GL_OES_EGL_image_external not available");
+	}
+
+	state->egl = egl;
+	return wlr_renderer_init(state, &wlr_renderer_impl);
 }

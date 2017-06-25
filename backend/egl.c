@@ -1,9 +1,18 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES3/gl3.h>
+#include <GLES2/gl2.h>
 #include <gbm.h> // GBM_FORMAT_XRGB8888
+#include <stdlib.h>
 #include <wlr/util/log.h>
 #include "backend/egl.h"
+
+struct wlr_egl_api {
+	PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR;
+	PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR;
+	PFNEGLQUERYWAYLANDBUFFERWL eglQueryWaylandBufferWL;
+	PFNEGLBINDWAYLANDDISPLAYWL eglBindWaylandDisplayWL;
+	PFNEGLUNBINDWAYLANDDISPLAYWL eglUnbindWaylandDisplayWL;
+};
 
 const char *egl_error(void) {
 	switch (eglGetError()) {
@@ -110,9 +119,14 @@ static bool egl_get_config(EGLDisplay disp, EGLConfig *out, EGLenum platform) {
 }
 
 bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform,
-		void *remote_display, struct wl_display *local_display) {
+		void *remote_display) {
 	if (!egl_exts()) {
 		return false;
+	}
+
+	if (!(egl->api = calloc(1, sizeof(*egl->api)))) {
+		wlr_log_errno(L_ERROR, "Allocation failed");
+		goto error;
 	}
 
 	if (eglBindAPI(EGL_OPENGL_ES_API) == EGL_FALSE) {
@@ -148,33 +162,33 @@ bool wlr_egl_init(struct wlr_egl *egl, EGLenum platform,
 	}
 
 	eglMakeCurrent(egl->display, EGL_NO_SURFACE, EGL_NO_SURFACE, egl->context);
-	const char* extensions = eglQueryString(egl->display, EGL_EXTENSIONS);
-	if (strstr(extensions, "EGL_WL_bind_wayland_display") == NULL ||
-		strstr(extensions, "EGL_KHR_image_base") == NULL) {
+	egl->egl_exts = eglQueryString(egl->display, EGL_EXTENSIONS);
+	if (strstr(egl->egl_exts, "EGL_WL_bind_wayland_display") == NULL ||
+		strstr(egl->egl_exts, "EGL_KHR_image_base") == NULL) {
 		wlr_log(L_ERROR, "Required egl extensions not supported");
 		goto error;
 	}
 
-	egl->api.create_image = (void*) eglGetProcAddress("eglCreateImageKHR");
-    egl->api.destroy_image = (void*) eglGetProcAddress("eglDestroyImageKHR");
-    egl->api.bind_wayland_display = (void*) eglGetProcAddress("eglBindWaylandDisplayWL");
-    egl->api.unbind_wayland_display = (void*) eglGetProcAddress("eglUnbindWaylandDisplayWL");
-    egl->api.query_wayland_buffer = (void*) eglGetProcAddress("eglQueryWaylandBufferWL");
+	egl->api->eglCreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)
+		eglGetProcAddress("eglCreateImageKHR");
+    egl->api->eglDestroyImageKHR = (PFNEGLDESTROYIMAGEKHRPROC)
+		eglGetProcAddress("eglDestroyImageKHR");
+    egl->api->eglQueryWaylandBufferWL = (PFNEGLQUERYWAYLANDBUFFERWL)
+		(void*) eglGetProcAddress("eglQueryWaylandBufferWL");
+    egl->api->eglBindWaylandDisplayWL = (PFNEGLBINDWAYLANDDISPLAYWL)
+		(void*) eglGetProcAddress("eglBindWaylandDisplayWL");
+    egl->api->eglUnbindWaylandDisplayWL = (PFNEGLUNBINDWAYLANDDISPLAYWL)
+		(void*) eglGetProcAddress("eglUnbindWaylandDisplayWL");
 
-	if (egl->api.bind_wayland_display(egl->display, local_display) == EGL_FALSE) {
-		wlr_log(L_ERROR, "Failed to bind wayland display: %s", egl_error());
-		goto error;
-	}
-
-	egl->wl_display = local_display;
-
+	egl->gl_exts = (const char*) glGetString(GL_EXTENSIONS);
 	wlr_log(L_INFO, "Using EGL %d.%d", (int)major, (int)minor);
-	wlr_log(L_INFO, "Supported EGL extensions: %s", extensions);
+	wlr_log(L_INFO, "Supported EGL extensions: %s", egl->egl_exts);
 	wlr_log(L_INFO, "Using %s", glGetString(GL_VERSION));
-	wlr_log(L_INFO, "Supported OpenGL ES extensions: %s", glGetString(GL_EXTENSIONS));
+	wlr_log(L_INFO, "Supported OpenGL ES extensions: %s", egl->gl_exts);
 	return true;
 
 error:
+	free(egl->api);
 	eglTerminate(egl->display);
 	eglReleaseThread();
 	eglMakeCurrent(EGL_NO_DISPLAY, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -182,11 +196,44 @@ error:
 }
 
 void wlr_egl_free(struct wlr_egl *egl) {
-	egl->api.unbind_wayland_display(egl->display, egl->wl_display);
+	if(egl->wl_display && egl->api->eglUnbindWaylandDisplayWL)
+		egl->api->eglUnbindWaylandDisplayWL(egl->display, egl->wl_display);
+
 	eglDestroyContext(egl->display, egl->context);
 	eglTerminate(egl->display);
 	eglReleaseThread();
 	eglMakeCurrent(EGL_NO_DISPLAY, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+	free(egl->api);
+}
+
+bool wlr_egl_bind_display(struct wlr_egl *egl, struct wl_display *local_display) {
+	if(!egl->api->eglQueryWaylandBufferWL) {
+		return false;
+	}
+
+	egl->wl_display = local_display;
+	return egl->api->eglBindWaylandDisplayWL(egl->display, local_display);
+}
+
+bool wlr_egl_query_buffer(struct wlr_egl *egl, struct wl_resource *buf, int attrib,
+		int *value) {
+	if(!egl->api->eglQueryWaylandBufferWL) {
+		return false;
+	}
+
+	return egl->api->eglQueryWaylandBufferWL(egl->display, buf, attrib, value);
+}
+
+EGLImage wlr_egl_create_image(struct wlr_egl *egl, EGLenum target,
+		EGLClientBuffer buffer, const EGLint *attribs)
+{
+	return egl->api->eglCreateImageKHR(egl->display, egl->context, target,
+		buffer, attribs);
+}
+
+void wlr_egl_destroy_image(struct wlr_egl *egl, EGLImage image)
+{
+	egl->api->eglDestroyImageKHR(egl->display, image);
 }
 
 EGLSurface wlr_egl_create_surface(struct wlr_egl *egl, void *window) {

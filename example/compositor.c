@@ -36,7 +36,7 @@ int main() {
 	};
 	compositor_init(&compositor);
 
-	state.renderer = wlr_gles2_renderer_init();
+	state.renderer = wlr_gles2_renderer_init(compositor.backend->egl);
 	wl_display_init_shm(compositor.display);
 	wlr_wl_compositor_init(compositor.display);
 

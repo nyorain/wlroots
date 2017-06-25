@@ -10,9 +10,7 @@ struct wlr_backend_state;
 struct wlr_backend {
 	const struct wlr_backend_impl *impl;
 	struct wlr_backend_state *state;
-
-	list_t *outputs;
-	list_t *input_devices;
+	struct wlr_egl *egl;
 
 	struct {
 		struct wl_signal input_add;

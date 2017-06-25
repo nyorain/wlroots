@@ -76,7 +76,7 @@ bool wlr_surface_attach_shm(struct wlr_surface *surf, uint32_t format,
  * Prepares a matrix with the appropriate scale for the given surface and
  * multiplies it with the projection, producing a matrix that the shader can
  * muptlipy vertex coordinates with to get final screen coordinates.
- * 
+ *
  * The projection matrix is assumed to be an orthographic projection of [0,
  * width) and [0, height], and the x and y coordinates provided are used as
  * such.

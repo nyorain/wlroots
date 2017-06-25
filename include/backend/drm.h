@@ -24,8 +24,7 @@ struct wlr_drm_renderer {
 	struct wlr_egl egl;
 };
 
-bool wlr_drm_renderer_init(struct wlr_drm_renderer *renderer,
-	struct wl_display *display, int fd);
+bool wlr_drm_renderer_init(struct wlr_drm_renderer *renderer, int fd);
 void wlr_drm_renderer_free(struct wlr_drm_renderer *renderer);
 
 struct wlr_backend_state {

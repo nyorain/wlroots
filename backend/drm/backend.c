@@ -138,6 +138,7 @@ struct wlr_backend *wlr_drm_backend_create(struct wl_display *display,
 		goto error_event;
 	}
 
+	backend->egl = &state->renderer.egl;
 	return backend;
 
 error_event:

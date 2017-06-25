@@ -56,6 +56,7 @@ static bool wlr_wl_backend_init(struct wlr_backend_state* state) {
 		wlr_wl_output_create(state->backend);
 	}
 
+	state->backend->egl = &state->egl;
 	struct wl_event_loop *loop = wl_display_get_event_loop(state->local_display);
 	int fd = wl_display_get_fd(state->remote_display);
 	int events = WL_EVENT_READABLE | WL_EVENT_ERROR |
