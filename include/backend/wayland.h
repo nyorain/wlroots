@@ -25,6 +25,8 @@ struct wlr_backend_state {
 	struct wl_shell *shell;
 	struct wl_shm *shm;
 	struct wl_seat *seat;
+	struct wl_shm *shm;
+	struct wl_pointer *pointer;
 	const char *seatName;
 };
 
@@ -33,8 +35,12 @@ struct wlr_output_state {
 	struct wlr_output *wlr_output;
 	struct wl_surface *surface;
 	struct wl_shell_surface *shell_surface;
-	struct wl_egl_window* egl_window;
-	struct wl_callback* frame_callback;
+	struct wl_egl_window *egl_window;
+	struct wl_callback *frame_callback;
+	struct wl_shm_pool *cursor_pool;
+	struct wl_shm_buffer *cursor_buffer;
+	struct wl_surface *cursor_surface;
+	uint32_t enter_serial;
 	void *egl_surface;
 };
 

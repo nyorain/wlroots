@@ -236,6 +236,7 @@ static void seat_handle_capabilities(void *data, struct wl_seat *wl_seat,
 		wlr_device->pointer = wlr_pointer_create(&pointer_impl, pointer_state);
 		wlr_device->state->resource = wl_pointer;
 		wl_signal_emit(&state->backend->events.input_add, wlr_device);
+		state->pointer = wl_pointer;
 	}
 	if ((caps & WL_SEAT_CAPABILITY_KEYBOARD)) {
 		wlr_log(L_DEBUG, "seat %p offered keyboard", (void*) wl_seat);

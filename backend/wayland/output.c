@@ -45,8 +45,33 @@ static void wlr_wl_output_transform(struct wlr_output_state *output,
 	output->wlr_output->transform = transform;
 }
 
+static bool wlr_wl_output_set_cursor(struct wlr_output_state *output,
+		const uint8_t *buf, int32_t stride, uint32_t width, uint32_t height) {
+
+	if (!output->backend->shm) {
+		return false;
+	}
+
+	if (!output->cursor_surface) {
+		output->cursor_surface = wl_compositor_create_surface(output->backend->compositor);
+	}
+
+	// TODO: create cursor buffer
+
+	wl_surface_attach(output->cursor_surface, output->cursor_buffer, 0, 0);
+	wl_surface_damage(output->cursor_surface, 0, 0, width, height);
+	wl_surface_commit(output->cursor_surface);
+
+	if (!output->backend->pointer && output->enter_serial) {
+		// the hotspot is hardcoded to (0,0)
+		wl_pointer_set_cursor(output->backend->pointer, output->enter_serial,
+			output->cursor_surface, 0, 0);
+	}
+}
+
 static void wlr_wl_output_destroy(struct wlr_output_state *output) {
 	if(output->frame_callback) wl_callback_destroy(output->frame_callback);
+	if(output->cursor_surface) wl_surface_destroy(output->cursor_surface);
 	eglDestroySurface(output->backend->egl.display, output->surface);
 	wl_egl_window_destroy(output->egl_window);
 	wl_shell_surface_destroy(output->shell_surface);
@@ -59,6 +84,7 @@ static struct wlr_output_impl output_impl = {
 	.destroy = wlr_wl_output_destroy,
 	.make_current = wlr_wl_output_make_current,
 	.swap_buffers = wlr_wl_output_swap_buffers,
+	.set_cursor = wlr_wl_output_set_cursor,
 };
 
 void handle_ping(void* data, struct wl_shell_surface* ssurface, uint32_t serial) {
