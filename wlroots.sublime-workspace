@@ -1,0 +1,924 @@
+{
+	"auto_complete":
+	{
+		"selected_items":
+		[
+			[
+				"multipl",
+				"multiplyDiagonal"
+			],
+			[
+				"DLG_DEFA",
+				"DLG_DEFAULT_ASSERT"
+			],
+			[
+				"dlg_default_ou",
+				"dlg_default_output_styles\tconst struct dlg_style [6] dlg_default_output_styles"
+			],
+			[
+				"DLG_DEF",
+				"DLG_DEFAULT_TAGS\tDLG_DEFAULT_TAGS"
+			],
+			[
+				"pair",
+				"pairs\tstruct dlg_tag_func_pair * pairs"
+			],
+			[
+				"DLG_COLO",
+				"DLG_COLOR_NONE"
+			],
+			[
+				"DLG_TEXT",
+				"DLG_TEXT_STYLE_NONE"
+			],
+			[
+				"DLG_",
+				"DLG_PRINTF_ATTRIB\tDLG_PRINTF_ATTRIB(a, b)"
+			],
+			[
+				"DLG_FIRST",
+				"DLG_FIRST_HELPER"
+			],
+			[
+				"dlg_",
+				"dlg__get_handler\tdlg_handler dlg__get_handler()"
+			]
+		]
+	},
+	"buffers":
+	[
+		{
+			"file": "render/vulkan/renderer.c",
+			"settings":
+			{
+				"buffer_size": 15109,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		},
+		{
+			"file": "include/render/vulkan.h",
+			"settings":
+			{
+				"buffer_size": 2087,
+				"encoding": "UTF-8",
+				"line_ending": "Unix"
+			}
+		}
+	],
+	"build_system": "",
+	"build_system_choices":
+	[
+	],
+	"build_varint": "",
+	"command_palette":
+	{
+		"height": 354.0,
+		"last_filter": "",
+		"selected_items":
+		[
+			[
+				"menu",
+				"View: Toggle Menu"
+			],
+			[
+				"set syntax: meson",
+				"Set Syntax: Meson"
+			],
+			[
+				"pacakgedev",
+				"PackageDev: New Syntax Definition"
+			],
+			[
+				"install",
+				"Package Control: Install Package"
+			],
+			[
+				"linter disa",
+				"SublimeLinter: Disable Linter"
+			],
+			[
+				"previ",
+				"Markdown Preview: Preview in Browser"
+			],
+			[
+				"preview",
+				"Markdown Preview: Preview in Browser"
+			],
+			[
+				"markdown ex",
+				"Set Syntax: Markdown Extended"
+			],
+			[
+				"toggle men",
+				"View: Toggle Menu"
+			],
+			[
+				"markdown",
+				"Markdown Preview: Preview in Browser"
+			],
+			[
+				"men",
+				"View: Toggle Menu"
+			],
+			[
+				"lint mo",
+				"SublimeLinter: Choose Lint Mode"
+			],
+			[
+				"linter",
+				"Preferences: SublimeLinter Settings – User"
+			],
+			[
+				"linter cho",
+				"SublimeLinter: Choose Lint Mode"
+			],
+			[
+				"show e",
+				"SublimeLinter: Show Errors on Save"
+			],
+			[
+				"toggle",
+				"View: Toggle Menu"
+			],
+			[
+				"remov",
+				"Package Control: Remove Package"
+			],
+			[
+				"isntall",
+				"Package Control: Install Package"
+			],
+			[
+				"install ",
+				"Package Control: Install Package"
+			],
+			[
+				"next ",
+				"SublimeLinter: Next Error"
+			],
+			[
+				"lint",
+				"SublimeLinter: Next Error"
+			],
+			[
+				"easyclang",
+				"EasyClangComplete: Settings"
+			],
+			[
+				"install pa",
+				"Package Control: Install Package"
+			],
+			[
+				"select",
+				"UI: Select Color Scheme"
+			],
+			[
+				"select th",
+				"UI: Select Theme"
+			]
+		],
+		"width": 559.0
+	},
+	"console":
+	{
+		"height": 147.0,
+		"history":
+		[
+			"list",
+			"help",
+			"toggle_menu",
+			"print(directory);",
+			"print(directory)"
+		]
+	},
+	"distraction_free":
+	{
+		"menu_visible": true,
+		"show_minimap": false,
+		"show_open_files": false,
+		"show_tabs": false,
+		"side_bar_visible": false,
+		"status_bar_visible": false
+	},
+	"expanded_folders":
+	[
+		"/mnt/data/programming/projects/secondary/wlroots",
+		"/mnt/data/programming/projects/secondary/wlroots/render",
+		"/mnt/data/programming/projects/secondary/wlroots/render/vulkan"
+	],
+	"file_history":
+	[
+		"/mnt/data/programming/projects/secondary/wlroots/rootston/main.c",
+		"/mnt/data/programming/projects/secondary/wlroots/render/gles2/renderer.c",
+		"/mnt/data/programming/projects/secondary/wlroots/.clang_complete",
+		"/mnt/data/programming/projects/secondary/wlroots/include/render/gles2.h",
+		"/mnt/data/programming/projects/secondary/wlroots/render/vulkan/wayland-drm-server-protocol.h",
+		"/mnt/data/programming/projects/secondary/wlroots/include/wlr/render/gles2.h",
+		"/mnt/data/programming/projects/secondary/wlroots/.editorconfig",
+		"/mnt/data/programming/projects/secondary/wlroots/.gitignore",
+		"/mnt/data/programming/projects/secondary/wlroots/wlroots.sublime-project",
+		"/mnt/data/programming/projects/ny/src/ny/wayland/util.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/wayland/input.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/wayland/dataExchange.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/wayland/appContext.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/x11/appContext.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/winapi/wgl.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/x11/dataExchange.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/x11/windowContext.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/common/gl.cpp",
+		"/mnt/data/programming/projects/ny/src/examples/gl.cpp",
+		"/mnt/data/programming/projects/ny/src/examples/basic.cpp",
+		"/mnt/data/programming/projects/ny/include/ny/asyncRequest.hpp",
+		"/mnt/data/programming/projects/ny/include/ny/loopControl.hpp",
+		"/mnt/data/programming/projects/ny/src/ny/android/activity.cpp",
+		"/mnt/data/programming/projects/ny/include/ny/windowContext.hpp",
+		"/mnt/data/programming/projects/ny/include/ny/dataExchange.hpp",
+		"/mnt/data/programming/projects/ny/include/ny/keyboardContext.hpp",
+		"/mnt/data/programming/projects/ny/src/examples/dev.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/winapi/input.cpp",
+		"/mnt/data/programming/projects/ny/meson.build",
+		"/mnt/data/programming/projects/ny/src/ny/dataExchange.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/common/xkb.cpp",
+		"/mnt/data/programming/projects/ny/include/ny/surface.hpp",
+		"/mnt/data/programming/projects/ny/include/ny/nativeHandle.hpp",
+		"/mnt/data/programming/projects/ny/src/ny/android/input.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/android/egl.cpp",
+		"/mnt/data/programming/projects/ny/src/examples/intro.cpp",
+		"/mnt/data/programming/projects/ny/include/ny/ny.hpp",
+		"/mnt/data/programming/projects/ny/subprojects/nytl/nytl/tmpUtil.hpp",
+		"/mnt/data/programming/projects/ny/src/ny/meson.build",
+		"/mnt/data/programming/projects/ny/src/ny/wayland/windowContext.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/winapi/appContext.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/winapi/bufferSurface.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/winapi/com.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/winapi/util.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/winapi/windowContext.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/x11/bufferSurface.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/x11/input.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/x11/util.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/wayland/egl.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/android/bufferSurface.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/android/appContext.cpp",
+		"/mnt/data/programming/projects/ny/subprojects/dlg.wrap",
+		"/mnt/data/programming/projects/ny/subprojects/nytl.wrap",
+		"/mnt/data/programming/projects/ny/include/ny/image.hpp",
+		"/mnt/data/programming/projects/ny/docs/todo.md",
+		"/mnt/data/programming/projects/ny/include/ny/backend.hpp",
+		"/mnt/data/programming/projects/ny/src/ny/backend.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/common/egl.cpp",
+		"/mnt/data/programming/projects/ny/src/ny/x11/glx.cpp",
+		"/mnt/data/programming/projects/ny/.clang_complete",
+		"/mnt/data/programming/projects/ny/include/ny/meson.build",
+		"/home/nyorain/.config/sublime-text-3/Packages/User/meson.sublime-syntax",
+		"/mnt/data/programming/projects/ny/src/ny/wayland/bufferSurface.cpp",
+		"/mnt/data/programming/projects/ny/include/ny/log.hpp",
+		"/mnt/data/programming/projects/ny/.gitignore",
+		"/mnt/data/programming/projects/nytl/nytl/mat.hpp",
+		"/mnt/data/programming/projects/nytl/nytl/approx.hpp",
+		"/mnt/data/programming/projects/nytl/docs/tests/test.hpp",
+		"/mnt/data/programming/projects/nytl/nytl/matOps.hpp",
+		"/mnt/data/programming/projects/nytl/docs/tests/approx.cpp",
+		"/mnt/data/programming/projects/nytl/.travis.yml",
+		"/mnt/data/programming/projects/nytl/meson.build",
+		"/mnt/data/programming/projects/nytl/docs/tests/mat.cpp",
+		"/mnt/data/programming/projects/nytl/docs/tests/meson.build",
+		"/mnt/data/programming/projects/nytl/nytl/approxVec.hpp",
+		"/mnt/data/programming/projects/nytl/nytl/vec.hpp",
+		"/mnt/data/programming/projects/nytl/nytl/scalar.hpp",
+		"/mnt/data/programming/projects/nytl/docs/tests/vec.cpp",
+		"/mnt/data/programming/projects/nytl/nytl/vecOps.hpp",
+		"/mnt/data/programming/projects/nytl/nytl/rectOps.hpp",
+		"/mnt/data/programming/projects/nytl/nytl/span.hpp",
+		"/mnt/data/programming/projects/nytl/nytl/fwd/span.hpp",
+		"/mnt/data/programming/projects/nytl/docs/tests/dynVec.cpp",
+		"/home/nyorain/.config/sublime-text-3/Packages/User/SublimeLinter.sublime-settings",
+		"/mnt/data/programming/projects/nytl/.gitignore",
+		"/mnt/data/programming/projects/nytl/nytl/assure.hpp",
+		"/mnt/data/programming/projects/nytl/.clang_complete",
+		"/mnt/data/programming/projects/nytl/nytl/dynVec.hpp",
+		"/mnt/data/programming/projects/dlg/docs/tests/core.c",
+		"/mnt/data/programming/projects/dlg/docs/notes.md",
+		"/mnt/data/programming/projects/dlg/docs/tests/meson.build",
+		"/mnt/data/programming/projects/dlg/docs/tests/cpp.cpp",
+		"/mnt/data/programming/projects/dlg/docs/tests/level.c",
+		"/mnt/data/programming/projects/dlg/docs/tests/disabled.c",
+		"/mnt/data/programming/projects/dlg/appveyor.yml",
+		"/mnt/data/programming/projects/dlg/docs/todo.md",
+		"/mnt/data/programming/projects/dlg/docs/v0.2.md",
+		"/mnt/data/programming/projects/dlg/meson.build",
+		"/mnt/data/programming/projects/dlg/include/dlg/dlg.h",
+		"/mnt/data/programming/projects/dlg/docs/examples/example.cpp",
+		"/mnt/data/programming/projects/dlg/docs/examples/example.c",
+		"/mnt/data/programming/projects/dlg/src/dlg/dlg.c",
+		"/mnt/data/programming/projects/dlg/include/dlg/output.h",
+		"/mnt/data/programming/projects/dlg/README.md",
+		"/mnt/data/programming/projects/dlg/include/dlg/dlg.hpp",
+		"/mnt/data/programming/projects/dlg/.travis.yml",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/examples/example.png",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/v0.2.md",
+		"/home/nyorain/programming/projects/secondary/dlg/include/dlg/dlg.h",
+		"/home/nyorain/programming/projects/secondary/dlg/include/dlg/dlg.hpp",
+		"/home/nyorain/programming/projects/secondary/dlg/README.md",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/tests/core.c",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/tests/meson.build",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/examples/example.cpp",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/todo.md",
+		"/home/nyorain/programming/projects/secondary/dlg/include/dlg/output.h",
+		"/home/nyorain/programming/projects/secondary/dlg/src/dlg/dlg.c",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/tests/cpp.cpp",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/tests/basic.cpp",
+		"/home/nyorain/programming/projects/secondary/dlg/old/dlg.cpp",
+		"/home/nyorain/programming/projects/secondary/dlg/.travis.yml",
+		"/mnt/data/docs/synced/uni/s2/audklausur.md",
+		"/mnt/data/docs/synced/uni/s2/aud1.md",
+		"/home/nyorain/programming/projects/secondary/dlg/old/streambuf.cpp",
+		"/home/nyorain/programming/projects/secondary/dlg/old/sketch.hpp",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/example_old1.png",
+		"/home/nyorain/programming/projects/secondary/dlg/docs/example.png",
+		"/home/nyorain/programming/projects/secondary/dlg/meson.build"
+	],
+	"find":
+	{
+		"height": 23.0
+	},
+	"find_in_files":
+	{
+		"height": 114.0,
+		"where_history":
+		[
+			""
+		]
+	},
+	"find_state":
+	{
+		"case_sensitive": false,
+		"find_history":
+		[
+			"wlr_renderer_init"
+		],
+		"highlight": true,
+		"in_selection": false,
+		"preserve_case": false,
+		"regex": false,
+		"replace_history":
+		[
+		],
+		"reverse": false,
+		"show_context": true,
+		"use_buffer2": true,
+		"whole_word": false,
+		"wrap": true
+	},
+	"groups":
+	[
+		{
+			"selected": 0,
+			"sheets":
+			[
+				{
+					"buffer": 0,
+					"file": "render/vulkan/renderer.c",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 15109,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								13153,
+								13153
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"open_with_edit": true,
+							"syntax": "Packages/C++/C.sublime-syntax",
+							"translate_tabs_to_spaces": false,
+							"vintage":
+							{
+								"_vintageous_glue_until_normal_mode": false,
+								"action": null,
+								"action_count": "",
+								"mode": "mode_normal",
+								"motion": null,
+								"motion_count": "",
+								"must_capture_register_name": false,
+								"normal_insert_count": "1",
+								"partial_sequence": "",
+								"register": "\"",
+								"sequence": "",
+								"xpos": 29
+							}
+						},
+						"translation.x": 0.0,
+						"translation.y": 5905.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				},
+				{
+					"buffer": 1,
+					"file": "include/render/vulkan.h",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 2087,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1923,
+								1923
+							]
+						],
+						"settings":
+						{
+							"git_gutter_is_enabled": true,
+							"highlight_line": false,
+							"open_with_edit": true,
+							"syntax": "Packages/C++/C++.sublime-syntax",
+							"translate_tabs_to_spaces": false,
+							"vintage":
+							{
+								"_vintageous_glue_until_normal_mode": false,
+								"action": null,
+								"action_count": "",
+								"mode": "mode_normal",
+								"motion": null,
+								"motion_count": "",
+								"must_capture_register_name": false,
+								"normal_insert_count": "1",
+								"partial_sequence": "",
+								"register": "\"",
+								"sequence": "",
+								"xpos": 11
+							}
+						},
+						"translation.x": 0.0,
+						"translation.y": 285.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				}
+			]
+		}
+	],
+	"incremental_find":
+	{
+		"height": 23.0
+	},
+	"input":
+	{
+		"height": 39.0
+	},
+	"layout":
+	{
+		"cells":
+		[
+			[
+				0,
+				0,
+				1,
+				1
+			]
+		],
+		"cols":
+		[
+			0.0,
+			1.0
+		],
+		"rows":
+		[
+			0.0,
+			1.0
+		]
+	},
+	"menu_visible": false,
+	"output.find_results":
+	{
+		"height": 0.0
+	},
+	"pinned_build_system": "",
+	"project": "wlroots.sublime-project",
+	"replace":
+	{
+		"height": 42.0
+	},
+	"save_all_on_build": true,
+	"select_file":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+			[
+				"gles2.c",
+				"render/gles2/renderer.c"
+			],
+			[
+				"com.cpp",
+				"src/ny/winapi/com.cpp"
+			],
+			[
+				"wayland/appc",
+				"src/ny/wayland/appContext.cpp"
+			],
+			[
+				"appcontext.cpp",
+				"src/ny/x11/appContext.cpp"
+			],
+			[
+				"util.hp",
+				"include/ny/wayland/util.hpp"
+			],
+			[
+				"wayland/util.cpp",
+				"src/ny/wayland/util.cpp"
+			],
+			[
+				"android.cpp",
+				"src/ny/android/activity.cpp"
+			],
+			[
+				"dataexchange.hpp",
+				"include/ny/dataExchange.hpp"
+			],
+			[
+				"loopcontrol.hpp",
+				"include/ny/loopControl.hpp"
+			],
+			[
+				"xkb.cpp",
+				"src/ny/common/xkb.cpp"
+			],
+			[
+				"keyboard",
+				"include/ny/keyboardContext.hpp"
+			],
+			[
+				"baic.cpp",
+				"src/examples/basic.cpp"
+			],
+			[
+				"dev.cpp",
+				"src/examples/dev.cpp"
+			],
+			[
+				"basic.cpp",
+				"src/examples/basic.cpp"
+			],
+			[
+				"gl.cpp",
+				"src/examples/gl.cpp"
+			],
+			[
+				"ny.hpp",
+				"include/ny/ny.hpp"
+			],
+			[
+				"wayland/datae",
+				"src/ny/wayland/dataExchange.cpp"
+			],
+			[
+				"input.cpp",
+				"src/ny/wayland/input.cpp"
+			],
+			[
+				"wayland/dataex",
+				"src/ny/wayland/dataExchange.cpp"
+			],
+			[
+				"wayland/inpu",
+				"src/ny/wayland/input.cpp"
+			],
+			[
+				"x11/window",
+				"src/ny/x11/windowContext.cpp"
+			],
+			[
+				"dataex",
+				"src/ny/dataExchange.cpp"
+			],
+			[
+				"src/",
+				"src/ny/meson.build"
+			],
+			[
+				"meson.build",
+				"meson.build"
+			],
+			[
+				"src/meson.b",
+				"src/ny/meson.build"
+			],
+			[
+				"wayland/appcontext.cpp",
+				"src/ny/wayland/appContext.cpp"
+			],
+			[
+				"src/meson.build",
+				"src/ny/meson.build"
+			],
+			[
+				"gl.cp",
+				"src/examples/gl.cpp"
+			],
+			[
+				"wayland/app",
+				"src/ny/wayland/appContext.cpp"
+			],
+			[
+				"glx.cpp",
+				"src/ny/x11/glx.cpp"
+			],
+			[
+				"backend.hpp",
+				"include/ny/backend.hpp"
+			],
+			[
+				"todo.md",
+				"docs/todo.md"
+			],
+			[
+				"wayland/buffer",
+				"src/ny/wayland/bufferSurface.cpp"
+			],
+			[
+				"meson.",
+				"include/ny/meson.build"
+			],
+			[
+				"log.hpp",
+				"include/ny/log.hpp"
+			],
+			[
+				"dataexchange.cpp",
+				"src/ny/dataExchange.cpp"
+			],
+			[
+				"image.hpp",
+				"include/ny/image.hpp"
+			],
+			[
+				".tra",
+				".travis.yml"
+			],
+			[
+				"test.hpp",
+				"docs/tests/test.hpp"
+			],
+			[
+				"approx.cpp",
+				"docs/tests/approx.cpp"
+			],
+			[
+				"rectops",
+				"nytl/rectOps.hpp"
+			],
+			[
+				"vecops",
+				"nytl/vecOps.hpp"
+			],
+			[
+				"approx.hpp",
+				"nytl/approx.hpp"
+			],
+			[
+				"vec.cpp",
+				"docs/tests/vec.cpp"
+			],
+			[
+				"mat.hpp",
+				"nytl/mat.hpp"
+			],
+			[
+				"approx",
+				"nytl/approxVec.hpp"
+			],
+			[
+				"mat.cpp",
+				"docs/tests/mat.cpp"
+			],
+			[
+				"matops",
+				"nytl/matOps.hpp"
+			],
+			[
+				"span.hpp",
+				"nytl/fwd/span.hpp"
+			],
+			[
+				"scal",
+				"nytl/scalar.hpp"
+			],
+			[
+				"vecops.hp",
+				"nytl/vecOps.hpp"
+			],
+			[
+				"vec.hpp",
+				"nytl/vec.hpp"
+			],
+			[
+				"mat.hp",
+				"nytl/mat.hpp"
+			],
+			[
+				"matops.hpp",
+				"nytl/matOps.hpp"
+			],
+			[
+				"meson.b",
+				"meson.build"
+			],
+			[
+				"approxvec",
+				"nytl/approxVec.hpp"
+			],
+			[
+				"assure.hp",
+				"nytl/assure.hpp"
+			],
+			[
+				"vecops.hpp",
+				"nytl/vecOps.hpp"
+			],
+			[
+				"cpp.cpp",
+				"docs/tests/cpp.cpp"
+			],
+			[
+				"core.c",
+				"docs/tests/core.c"
+			],
+			[
+				"disa",
+				"docs/tests/disabled.c"
+			],
+			[
+				"dlg.h",
+				"include/dlg/dlg.h"
+			],
+			[
+				"dlg.hpp",
+				"include/dlg/dlg.hpp"
+			],
+			[
+				"todo",
+				"docs/todo.md"
+			],
+			[
+				"re",
+				"README.md"
+			],
+			[
+				"exampl",
+				"docs/examples/example.c"
+			],
+			[
+				"read",
+				"README.md"
+			],
+			[
+				"v0",
+				"docs/v0.2.md"
+			],
+			[
+				"example.cpp",
+				"docs/examples/example.cpp"
+			],
+			[
+				"red",
+				"README.md"
+			],
+			[
+				"v",
+				"docs/v0.2.md"
+			],
+			[
+				"exa",
+				"docs/examples/example.cpp"
+			],
+			[
+				"output.h",
+				"include/dlg/output.h"
+			],
+			[
+				"dlg.c",
+				"src/dlg/dlg.c"
+			],
+			[
+				"c",
+				"docs/tests/core.c"
+			],
+			[
+				"basic",
+				"docs/tests/basic.cpp"
+			],
+			[
+				"v02",
+				"docs/v0.2.md"
+			],
+			[
+				".trav",
+				".travis.yml"
+			],
+			[
+				"v1",
+				"docs/v0.1.md"
+			],
+			[
+				"dlg.cpp",
+				"old/dlg.cpp"
+			],
+			[
+				"small",
+				"docs/smallfmt.cpp"
+			],
+			[
+				"config.h",
+				"include/dlg/config.h"
+			],
+			[
+				"output.hpp",
+				"include/dlg/output.hpp"
+			],
+			[
+				"outpu",
+				"docs/c_api/output.h"
+			],
+			[
+				"dl.",
+				"include/dlg/dlg.hpp"
+			],
+			[
+				".clan",
+				".clang_complete"
+			],
+			[
+				".cl",
+				".clang_complete"
+			],
+			[
+				"dlg.",
+				"include/dlg/config.h"
+			]
+		],
+		"width": 0.0
+	},
+	"select_project":
+	{
+		"height": 501.0,
+		"last_filter": "",
+		"selected_items":
+		[
+			[
+				"",
+				"/mnt/data/programming/projects/nytl/nytl.sublime-project"
+			],
+			[
+				"dlg",
+				"~/.config/sublime-text-3/projcts/dlg.sublime-project"
+			]
+		],
+		"width": 381.0
+	},
+	"select_symbol":
+	{
+		"height": 0.0,
+		"last_filter": "",
+		"selected_items":
+		[
+		],
+		"width": 0.0
+	},
+	"selected_group": 0,
+	"settings":
+	{
+		"_vintageous_last_buffer_search": "init_vulkan",
+		"_vintageous_last_buffer_search_command": "vi_slash",
+		"_vintageous_reset_during_init": true,
+		"vintage":
+		{
+			"_cmdline_cd": "/opt/sublime_text"
+		}
+	},
+	"show_minimap": true,
+	"show_open_files": false,
+	"show_tabs": true,
+	"side_bar_visible": true,
+	"side_bar_width": 253.0,
+	"status_bar_visible": true,
+	"template_settings":
+	{
+	}
+}
