@@ -1135,12 +1135,6 @@ static void page_flip_handler(int fd, unsigned seq,
 		return;
 	}
 
-	// TODO: required here or enough if done in renderer on next frame?
-	// post_drm_surface(&conn->crtc->primary->surf);
-	// if (drm->parent) {
-	// 	post_drm_surface(&conn->crtc->primary->mgpu_surf);
-	// }
-
 	if (drm->session->active) {
 		wlr_output_send_frame(&conn->output);
 	}
