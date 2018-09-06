@@ -932,7 +932,7 @@ static const struct wlr_render_surface_impl offscreen_render_surface_impl = {
 };
 
 // swapchain render surface
-static struct wlr_render_surface *swapchain_render_surface_create(
+struct wlr_vk_swapchain_render_surface *vulkan_swapchain_render_surface_create(
 		struct wlr_vk_renderer *renderer, uint32_t width, uint32_t height,
 		VkSurfaceKHR surface) {
 
@@ -996,7 +996,7 @@ static struct wlr_render_surface *swapchain_render_surface_create(
 		goto error;
 	}
 
-	return &rs->vk_rs.rs;
+	return rs;
 
 error:
 	swapchain_render_surface_destroy(&rs->vk_rs.rs);
@@ -1069,7 +1069,8 @@ struct wlr_render_surface *vulkan_render_surface_create_xcb(
 		return NULL;
 	}
 
-	return swapchain_render_surface_create(renderer, width, height, surf);
+	return &vulkan_swapchain_render_surface_create(renderer, width,
+		height, surf)->vk_rs.rs;
 #else
 	return NULL;
 #endif
@@ -1099,7 +1100,8 @@ struct wlr_render_surface *vulkan_render_surface_create_wl(
 		return NULL;
 	}
 
-	return swapchain_render_surface_create(renderer, width, height, surf);
+	return &vulkan_swapchain_render_surface_create(renderer, width,
+		height, surf)->vk_rs.rs;
 }
 
 struct wlr_render_surface *vulkan_render_surface_create_gbm(

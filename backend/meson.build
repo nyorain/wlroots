@@ -25,6 +25,8 @@ backend_files = files(
 	'wayland/output.c',
 	'wayland/registry.c',
 	'wayland/wl_seat.c',
+
+	'vk_display/backend.c',
 )
 
 backend_deps = [

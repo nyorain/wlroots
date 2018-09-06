@@ -316,6 +316,10 @@ struct wlr_render_surface *vulkan_render_surface_create_gbm(
 	struct wlr_renderer *renderer, uint32_t width, uint32_t height,
 	struct gbm_device *gbm_dev, uint32_t flags);
 
+struct wlr_vk_swapchain_render_surface *vulkan_swapchain_render_surface_create(
+	struct wlr_vk_renderer *renderer, uint32_t width, uint32_t height,
+	VkSurfaceKHR surface);
+
 VkFramebuffer vulkan_render_surface_begin(struct wlr_vk_render_surface *rs,
 	VkCommandBuffer cb);
 void vulkan_render_surface_end(struct wlr_vk_render_surface *rs,

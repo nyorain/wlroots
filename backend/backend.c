@@ -21,6 +21,10 @@
 #include <wlr/backend/x11.h>
 #endif
 
+#ifdef WLR_HAS_VULKAN
+#include <wlr/backend/vk_display.h>
+#endif
+
 void wlr_backend_init(struct wlr_backend *backend,
 		const struct wlr_backend_impl *impl) {
 	assert(backend);
@@ -180,6 +184,13 @@ static struct wlr_backend *attempt_backend_by_name(struct wl_display *display,
 		} else {
 			return attempt_drm_backend(display, backend, *session, create_renderer_func);
 		}
+#ifdef WLR_HAS_VULKAN
+	} else if(strcmp(name, "vk_display") == 0) {
+		if (create_renderer_func) {
+			wlr_log(WLR_ERROR, "create_renderer_func ignored on vk_display backend");
+		}
+		return wlr_vk_display_backend_create(display);
+#endif
 	}
 
 	wlr_log(WLR_ERROR, "unrecognized backend '%s'", name);
