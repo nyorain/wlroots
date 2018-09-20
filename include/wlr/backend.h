@@ -11,7 +11,7 @@
 
 #include <wayland-server.h>
 #include <wlr/backend/session.h>
-#include <wlr/render/egl.h>
+#include <EGL/egl.h>
 
 struct wlr_backend_impl;
 
@@ -36,8 +36,8 @@ typedef struct wlr_renderer *(*wlr_renderer_create_func_t)(
  * Returns NULL on failure.
  *
  * The compositor can request to initialize the backend's renderer by setting
- * the create_render_func. The callback must initialize the given wlr_egl and
- * return a valid wlr_renderer, or NULL if it has failed to initiaze it.
+ * the create_render_func. The callback must return a valid wlr_renderer,
+ * or NULL if it has failed to initialize it.
  * Pass NULL as create_renderer_func to use the backend's default renderer.
  */
 struct wlr_backend *wlr_backend_autocreate(struct wl_display *display,
@@ -57,5 +57,13 @@ void wlr_backend_destroy(struct wlr_backend *backend);
  * Obtains the wlr_renderer reference this backend is using.
  */
 struct wlr_renderer *wlr_backend_get_renderer(struct wlr_backend *backend);
+/**
+ * Obtains the parameters to initialize a wlr_egl object for this backend.
+ * Returns false if they can't be given since egl is not supported on
+ * the backend.
+ */
+bool wlr_backend_egl_params(struct wlr_backend *backend,
+	EGLenum *platform, void **remote_display,
+	const EGLint **config_attribs, EGLint *visualid);
 
 #endif

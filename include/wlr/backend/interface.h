@@ -17,7 +17,8 @@ struct wlr_backend_impl {
 	bool (*start)(struct wlr_backend *backend);
 	void (*destroy)(struct wlr_backend *backend);
 	struct wlr_renderer *(*get_renderer)(struct wlr_backend *backend);
-	bool (*init_egl)(struct wlr_backend *backend, struct wlr_egl *egl);
+	bool (*egl_params)(struct wlr_backend *backend, EGLenum *platform,
+		void **remote_display, const EGLint **config_attribs, EGLint *visualid);
 };
 
 /**
