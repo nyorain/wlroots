@@ -58,6 +58,11 @@ void wlr_backend_destroy(struct wlr_backend *backend);
  */
 struct wlr_renderer *wlr_backend_get_renderer(struct wlr_backend *backend);
 /**
+ * Obtains the wlr_session reference from this backend if there is any.
+ * Might return NULL for backends that don't use a session.
+ */
+struct wlr_session *wlr_backend_get_session(struct wlr_backend *backend);
+/**
  * Obtains the parameters to initialize a wlr_egl object for this backend.
  * Returns false if they can't be given since egl is not supported on
  * the backend.

@@ -9,13 +9,6 @@ struct wlr_vk_renderer;
 
 // Creates all vulkan resources (inclusive instance) from scratch.
 struct wlr_renderer *wlr_vk_renderer_create(struct wlr_backend *backend);
-
-// Creates a vulkan renderer for an already existent vulkan object.
-// Passes ownership of the vulkan object to the renderer, so it must
-// not be destroyed.
-struct wlr_renderer *wlr_vk_renderer_create_for_vulkan(
-	struct wlr_backend *backend, struct wlr_vulkan *vulkan);
-
 struct wlr_texture *wlr_vk_texture_from_pixels(struct wlr_vk_renderer *renderer,
 	enum wl_shm_format wl_fmt, uint32_t stride, uint32_t width, uint32_t height,
 	const void *data);

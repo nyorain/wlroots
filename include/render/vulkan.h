@@ -335,7 +335,8 @@ void vulkan_change_layout(VkCommandBuffer cb, VkImage img,
 	VkImageLayout ol, VkPipelineStageFlags srcs, VkAccessFlags srca,
 	VkImageLayout nl, VkPipelineStageFlags dsts, VkAccessFlags dsta);
 
-#define wlr_vk_error(fmt, res, ...) wlr_log(WLR_ERROR, fmt ": %s (%d)", \
+#define wlr_vk_error(fmt, res, ...) wlr_log(WLR_ERROR, \
+	"vulkan error %s (%d): " fmt, \
 	vulkan_strerror(res), res, ##__VA_ARGS__)
 
 #endif

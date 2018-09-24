@@ -31,7 +31,7 @@ static const bool use_host_images = false;
 static const VkDeviceSize min_stage_size = 1024 * 1024; // 1MB
 static const VkDeviceSize max_stage_size = 64 * min_stage_size; // 64MB
 static const size_t start_descriptor_pool_size = 256u;
-static bool default_debug = true;
+static bool default_debug = false;
 
 static const struct wlr_renderer_impl renderer_impl;
 

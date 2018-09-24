@@ -30,6 +30,7 @@ backend_files = files(
 )
 
 backend_deps = [
+	threads,
 	drm,
 	egl,
 	gbm,

@@ -19,6 +19,7 @@ struct wlr_backend_impl {
 	bool (*start)(struct wlr_backend *backend);
 	void (*destroy)(struct wlr_backend *backend);
 	struct wlr_renderer *(*get_renderer)(struct wlr_backend *backend);
+	struct wlr_session *(*get_session)(struct wlr_backend *backend);
 	bool (*egl_params)(struct wlr_backend *backend, EGLenum *platform,
 		void **remote_display, const EGLint **config_attribs, EGLint *visualid);
 	bool (*vulkan_queue_family_present_support)(struct wlr_backend *backend,

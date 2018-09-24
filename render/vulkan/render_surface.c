@@ -634,7 +634,8 @@ static int swapchain_render_surface_buffer_age(
 		res = vkAcquireNextImageKHR(dev, rs->swapchain.swapchain,
 			0xFFFFFFFF, rs->acquire, VK_NULL_HANDLE, &id);
 		if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) {
-			wlr_vk_error("vkAcquireNextImageKHR", res);
+			wlr_vk_error("vkAcquireNextImageKHR on %p", res,
+				(void *)rs->surface);
 			return -1;
 		}
 

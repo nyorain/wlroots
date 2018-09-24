@@ -454,7 +454,11 @@ static void render_output(struct roots_output *output) {
 		goto damage_finish;
 	}
 
-	wlr_renderer_begin_output(renderer, output->wlr_output);
+	if (!wlr_renderer_begin_output(renderer, output->wlr_output)) {
+		wlr_log(WLR_INFO, "skipping frame");
+		goto damage_finish;
+	}
+
 	if (!pixman_region32_not_empty(&damage)) {
 		// Output isn't damaged but needs buffer swap
 		goto renderer_end;
