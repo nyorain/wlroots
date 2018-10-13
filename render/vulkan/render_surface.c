@@ -1339,10 +1339,11 @@ void vulkan_render_surface_end(struct wlr_vk_render_surface *rs,
 	}
 
 	if (src_layout != dst_layout || src_fam != dst_fam) {
-		// TODO: access flags, stage
 		vulkan_change_layout_queue(rs->cb, img,
-			src_layout, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
-			dst_layout, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+			src_layout, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			dst_layout, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			VK_ACCESS_MEMORY_READ_BIT,
 			src_fam, dst_fam);
 	}
 }

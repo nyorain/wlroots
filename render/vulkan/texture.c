@@ -547,14 +547,14 @@ error:
 	return NULL;
 }
 
+// TODO: respect attribs->flags if possible (fail it not)
 struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 		struct wlr_dmabuf_attributes *attribs) {
 	VkResult res;
 	VkDevice dev = renderer->dev->dev;
 	enum wl_shm_format wl_fmt = shm_from_drm_format(attribs->format);
 
-	struct wlr_vk_format_props *fmt =
-		wlr_vk_format_from_wl(renderer, wl_fmt);
+	struct wlr_vk_format_props *fmt = wlr_vk_format_from_wl(renderer, wl_fmt);
 	if (fmt == NULL) {
 		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32, wl_fmt);
 		return NULL;
@@ -657,16 +657,17 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 	bool drm_fmt_ext = dma_ext && vulkan_has_extension(
 		renderer->dev->extension_count, renderer->dev->extensions,
 		VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME);
+
+	VkSubresourceLayout plane_layouts[WLR_DMABUF_MAX_PLANES] = {0};
+	VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info = {0};
 	if (drm_fmt_ext) {
 		img_info.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
-		VkSubresourceLayout plane_layouts[WLR_DMABUF_MAX_PLANES] = {0};
 		for (unsigned i = 0u; i < plane_count; ++i) {
 			plane_layouts[i].offset = attribs->offset[i];
 			plane_layouts[i].rowPitch = attribs->stride[i];
 			plane_layouts[i].size = 0;
 		}
 
-		VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info = {0};
 		mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_EXCPLICIT_DRM_FORMAT_MODIFIER_CREATE_INFO_EXT;
 		mod_info.drmFormatModifierPlaneCount = plane_count;
 		mod_info.drmFormatModifier = mod->props.drmFormatModifier;
@@ -677,9 +678,8 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 		// TODO: not guaranteed by standard to work
 		// we should probably not support this at all if the extension
 		// is not found (i.e. fail early if (!drm_fmt_ext))
-		// using linear tiling when the modifier is MOD_INVALID is not
-		// how it's meant to be...
 		img_info.tiling = VK_IMAGE_TILING_LINEAR;
+		// img_info.tiling = VK_IMAGE_TILING_OPTIMAL;
 	} else {
 		wlr_log(WLR_ERROR, "Can't create dmabuf with mod: extension not present");
 		goto error;
@@ -689,6 +689,33 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("vkCreateImage", res);
 		goto error;
+	}
+
+	// TODO: sanity check for case not guaranteed by spec
+	// to be removed
+	if (img_info.tiling != VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT) {
+		for (unsigned i = 0u; i < plane_count; ++i) {
+			VkImageSubresource subres = {0};
+			subres.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			if (plane_count > 1) {
+				subres.aspectMask = plane_ascpect(i);
+			}
+
+			VkSubresourceLayout layout;
+			vkGetImageSubresourceLayout(dev, texture->image, &subres, &layout);
+			if (layout.offset != attribs->offset[i]) {
+				wlr_log(WLR_ERROR, "Invalid offset in plane %u: %lu vs %u",
+					i, layout.offset, attribs->offset[i]);
+				goto error;
+			}
+
+			VkDeviceSize stride = layout.rowPitch;
+			if (stride != attribs->stride[i]) {
+				wlr_log(WLR_ERROR, "Invalid stride in plane %u: %lu vs %u",
+					i, stride, attribs->stride[i]);
+				goto error;
+			}
+		}
 	}
 
 	unsigned mem_count = disjoint ? plane_count : 1u;
@@ -757,7 +784,7 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 			goto error;
 		}
 
-		texture->mem_count = i;
+		++texture->mem_count;
 
 		// fill bind info
 		bindi[i].image = texture->image;

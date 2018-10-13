@@ -10,7 +10,6 @@
 #include <wlr/util/log.h>
 #include <wlr/render/vulkan.h>
 #include <wlr/backend/interface.h>
-#include <render/vulkan.h>
 
 #include "shaders/common.vert.h"
 #include "shaders/texture.frag.h"
@@ -587,11 +586,6 @@ static void vulkan_scissor(struct wlr_renderer *wlr_renderer,
 	vkCmdSetScissor(cb, 0, 1, &rect);
 }
 
-static bool vulkan_resource_is_wl_drm_buffer(struct wlr_renderer *wlr_renderer,
-		struct wl_resource *resource) {
-	return false;
-}
-
 const enum wl_shm_format *vulkan_formats(struct wlr_renderer *wlr_renderer,
 		size_t *len) {
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
@@ -635,13 +629,6 @@ static void vulkan_render_ellipse_with_matrix(struct wlr_renderer *wlr_renderer,
 		VK_SHADER_STAGE_FRAGMENT_BIT, 16 * sizeof(float), sizeof(float) * 4,
 		color);
 	vkCmdDraw(cb, 4, 1, 0, 0);
-}
-
-static void vulkan_wl_drm_buffer_get_size(struct wlr_renderer *wlr_renderer,
-		struct wl_resource *buffer, int *width, int *height) {
-	wlr_log(WLR_ERROR, "vulkan wl_drm support not implemented");
-	*width = 0;
-	*height = 0;
 }
 
 static int vulkan_get_dmabuf_formats(struct wlr_renderer *wlr_renderer,
@@ -702,12 +689,6 @@ static struct wlr_texture *vulkan_texture_from_pixels(
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 	return wlr_vk_texture_from_pixels(renderer, wl_fmt, stride,
 		width, height, data);
-}
-
-static struct wlr_texture *vulkan_texture_from_wl_drm(
-		struct wlr_renderer *wlr_renderer, struct wl_resource *data) {
-	wlr_log(WLR_ERROR, "vulkan wl_drm support not implemented");
-	return NULL;
 }
 
 static struct wlr_texture *vulkan_texture_from_dmabuf(
@@ -787,13 +768,6 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 	free(renderer);
 }
 
-static void vulkan_init_wl_display(struct wlr_renderer *wlr_renderer,
-		struct wl_display *wl_display) {
-	wlr_log(WLR_ERROR, "vulkan wl_drm support not implemented");
-	// probably have to implement wl_drm ourselves since mesa
-	// still depends on it
-}
-
 static const struct wlr_renderer_impl renderer_impl = {
 	.begin = vulkan_begin,
 	.end = vulkan_end,
@@ -812,7 +786,7 @@ static const struct wlr_renderer_impl renderer_impl = {
 	.texture_from_wl_drm = vulkan_texture_from_wl_drm,
 	.texture_from_dmabuf = vulkan_texture_from_dmabuf,
 	.destroy = vulkan_destroy,
-	.init_wl_display = vulkan_init_wl_display,
+	.init_wl_display = vulkan_bind_wl_drm,
 	.render_surface_create_wl = vulkan_render_surface_create_wl,
 	.render_surface_create_xcb = vulkan_render_surface_create_xcb,
 	.render_surface_create_gbm = vulkan_render_surface_create_gbm,
@@ -852,6 +826,7 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	deps[0].srcSubpass = VK_SUBPASS_EXTERNAL;
 	deps[0].srcStageMask = VK_PIPELINE_STAGE_HOST_BIT |
 		VK_PIPELINE_STAGE_TRANSFER_BIT |
+		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT |
 		VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	deps[0].srcAccessMask = VK_ACCESS_HOST_WRITE_BIT |
 		VK_ACCESS_TRANSFER_WRITE_BIT |
@@ -868,7 +843,7 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	deps[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 	deps[1].dstSubpass = VK_SUBPASS_EXTERNAL;
 	deps[1].dstStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT |
-		VK_PIPELINE_STAGE_HOST_BIT;
+		VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 	deps[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT |
 		VK_ACCESS_MEMORY_READ_BIT;
 

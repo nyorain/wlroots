@@ -35,13 +35,13 @@ static void log_stderr(enum wlr_log_importance verbosity, const char *fmt,
 
 	unsigned c = (verbosity < WLR_LOG_IMPORTANCE_LAST) ? verbosity : WLR_LOG_IMPORTANCE_LAST - 1;
 
-	if (colored && isatty(STDERR_FILENO)) {
+	if (true || (colored && isatty(STDERR_FILENO))) {
 		fprintf(stderr, "%s", verbosity_colors[c]);
 	}
 
 	vfprintf(stderr, fmt, args);
 
-	if (colored && isatty(STDERR_FILENO)) {
+	if (true || (colored && isatty(STDERR_FILENO))) {
 		fprintf(stderr, "\x1B[0m");
 	}
 	fprintf(stderr, "\n");
