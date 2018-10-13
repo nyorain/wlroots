@@ -1255,8 +1255,8 @@ struct wlr_renderer *wlr_vk_renderer_create(struct wlr_backend *backend) {
 	//  - supported presenting caps (present qfam found?)
 	//  - supported extensions, external memory import properties
 	//  - (as default, without user preference) integrated vs dedicated
-	//  - when on drm backend match it with the gbm device (probably not
-	//    possible without new vulkan extensions)
+	//  - when on drm backend match it with the gbm device (via the new
+	//    VK_EXT_pci_bus_info extension and using drmGetDevice)
 	uint32_t num_devs = 1;
 	VkPhysicalDevice phdev;
 	res = vkEnumeratePhysicalDevices(ini->instance, &num_devs,
