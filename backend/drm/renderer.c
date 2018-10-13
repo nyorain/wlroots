@@ -53,13 +53,15 @@ void finish_drm_renderer(struct wlr_drm_renderer *renderer) {
 
 bool init_drm_render_surface(struct wlr_render_surface **surf,
 		struct wlr_drm_renderer *renderer, uint32_t width, uint32_t height,
-		uint32_t flags) {
+		uint32_t format, uint32_t flags, uint32_t modifier_count,
+		const uint64_t *modifiers) {
 	if (*surf) {
 		wlr_render_surface_resize(*surf, width, height);
 	}
 
 	*surf = wlr_render_surface_create_gbm(
-		renderer->wlr_rend, width, height, renderer->gbm, flags);
+		renderer->wlr_rend, width, height, renderer->gbm, format,
+		flags, modifier_count, modifiers);
 	return *surf;
 }
 
@@ -149,19 +151,43 @@ struct gbm_bo *copy_drm_surface_mgpu(struct wlr_drm_renderer *renderer,
 }
 
 bool init_drm_plane_surfaces(struct wlr_drm_plane *plane,
-		struct wlr_drm_backend *drm, int32_t width, uint32_t height) {
-	if (!drm->parent) {
-		return init_drm_render_surface(&plane->surf, &drm->renderer,
-			width, height, GBM_BO_USE_SCANOUT);
+		struct wlr_drm_backend *drm, int32_t width, uint32_t height,
+		uint32_t format) {
+	struct wlr_drm_format *drm_fmt = NULL;
+	for (unsigned i = 0u; i < plane->format_count; ++i) {
+		if (plane->formats[i].format == format) {
+			drm_fmt = &plane->formats[i];
+			break;
+		}
 	}
 
-	if (!init_drm_render_surface(&plane->surf, &drm->parent->renderer,
-			width, height, GBM_BO_USE_LINEAR)) {
+	if (!drm_fmt) {
+		wlr_log(WLR_ERROR, "Plane does not support format");
 		return false;
 	}
 
+	if (!drm->parent) {
+		return init_drm_render_surface(&plane->surf, &drm->renderer,
+			width, height, format, GBM_BO_USE_SCANOUT,
+			drm_fmt->modifier_count, drm_fmt->modifiers);
+	}
+
+	// when this backend uses a device that is not used for rendering
+	// we create two surfaces: one for rendering (plane->surf) and
+	// one that will be displayed (plane->mgpu_surf). Before swapping
+	// buffers we will copy from plane->surf to plane->mgpu_surf.
 	if (!init_drm_render_surface(&plane->mgpu_surf, &drm->renderer,
-			width, height, GBM_BO_USE_SCANOUT)) {
+			width, height, format, GBM_BO_USE_SCANOUT,
+			drm_fmt->modifier_count, drm_fmt->modifiers)) {
+		return false;
+	}
+
+	// TODO: instead of creating plane->surf with lienar usage/modifier,
+	// we could pass it the modifiers drm->renderer supports for
+	// importing dmabufs (, i guess?)
+	uint64_t linear_mod = DRM_FORMAT_MOD_LINEAR;
+	if (!init_drm_render_surface(&plane->surf, &drm->parent->renderer,
+			width, height, format, GBM_BO_USE_LINEAR, 1, &linear_mod)) {
 		return false;
 	}
 

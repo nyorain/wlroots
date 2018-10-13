@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <assert.h>
+#include <drm_fourcc.h>
 #include <vulkan/vulkan.h>
 #include <render/vulkan.h>
 #include <wlr/util/log.h>
@@ -14,7 +15,6 @@
 	#include <xcb/xcb.h>
 	#include <vulkan/vulkan_xcb.h>
 #endif
-
 
 // util
 static const struct wlr_render_surface_impl swapchain_render_surface_impl;
@@ -55,7 +55,8 @@ static size_t clamp(size_t val, size_t low, size_t high) {
 }
 
 static bool vulkan_read_pixels(struct wlr_vk_render_surface *rs,
-		VkImage read, enum wl_shm_format wl_fmt, uint32_t *flags,
+		VkImage read, VkImageLayout layout,
+		enum wl_shm_format wl_fmt, uint32_t *flags,
 		uint32_t stride, uint32_t width, uint32_t height,
 		uint32_t src_x, uint32_t src_y,
 		uint32_t dst_x, uint32_t dst_y, void *vdata) {
@@ -81,7 +82,7 @@ static bool vulkan_read_pixels(struct wlr_vk_render_surface *rs,
 
 	VkCommandBuffer cb = wlr_vk_record_stage_cb(renderer);
 	vulkan_change_layout(cb, read,
-		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+		layout, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
 		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
 		VK_ACCESS_TRANSFER_READ_BIT);
 
@@ -98,7 +99,7 @@ static bool vulkan_read_pixels(struct wlr_vk_render_surface *rs,
 	vulkan_change_layout(cb, read,
 		VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
 		VK_ACCESS_TRANSFER_READ_BIT,
-		VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+		layout, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
 		0);
 
 	if (!wlr_vk_submit_stage_wait(renderer)) {
@@ -481,8 +482,8 @@ static bool swapchain_read_pixels(struct wlr_render_surface *wlr_rs,
 	}
 
 	VkImage read = srs->swapchain.buffers[srs->current_id].image;
-	return vulkan_read_pixels(&srs->vk_rs, read, wl_fmt, flags,
-		stride, width, height, src_x, src_y, dst_x, dst_y, vdata);
+	return vulkan_read_pixels(&srs->vk_rs, read, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+		wl_fmt, flags, stride, width, height, src_x, src_y, dst_x, dst_y, vdata);
 }
 
 static bool swapchain_swap_buffers(struct wlr_render_surface *wlr_rs,
@@ -662,8 +663,8 @@ static bool offscreen_read_pixels(struct wlr_render_surface *wlr_rs,
 	struct wlr_vk_offscreen_render_surface *ors =
 		vulkan_get_render_surface_offscreen(wlr_rs);
 	VkImage read = ors->back->buffer.image;
-	return vulkan_read_pixels(&ors->vk_rs, read, wl_fmt, flags,
-		stride, width, height, src_x, src_y, dst_x, dst_y, vdata);
+	return vulkan_read_pixels(&ors->vk_rs, read, VK_IMAGE_LAYOUT_GENERAL,
+		wl_fmt, flags, stride, width, height, src_x, src_y, dst_x, dst_y, vdata);
 }
 
 static bool offscreen_swap_buffers(struct wlr_render_surface *wlr_rs,
@@ -728,22 +729,24 @@ static void offscreen_render_surface_destroy(struct wlr_render_surface *wlr_rs) 
 			1u, &rs->vk_rs.cb);
 	}
 
+	wlr_vk_format_props_finish(&rs->format);
 	free(rs);
 }
 
 static bool offscreen_render_surface_init_buffers(
-		struct wlr_vk_offscreen_render_surface *rs) {
+		struct wlr_vk_offscreen_render_surface *rs, uint32_t use_flags,
+		uint32_t mod_count, uint64_t *modifiers) {
 
 	VkResult res;
 	uint32_t width = rs->vk_rs.rs.width;
 	uint32_t height = rs->vk_rs.rs.height;
 	struct wlr_vk_device *dev = rs->vk_rs.renderer->dev;
+	uint32_t gbm_fmt = drm_from_shm_format(rs->format.format.wl_format);
 
-	const VkFormat format = VK_FORMAT_B8G8R8A8_UNORM;
 	VkImageCreateInfo img_info = {0};
 	img_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	img_info.imageType = VK_IMAGE_TYPE_2D;
-	img_info.format = format;
+	img_info.format = rs->format.format.vk_format;
 	img_info.mipLevels = 1;
 	img_info.arrayLayers = 1;
 	img_info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -756,7 +759,7 @@ static bool offscreen_render_surface_init_buffers(
 
 	VkImageViewCreateInfo view_info = {0};
 	view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-	view_info.format = format;
+	view_info.format = rs->format.format.vk_format;
 	view_info.components.r = VK_COMPONENT_SWIZZLE_R;
 	view_info.components.g = VK_COMPONENT_SWIZZLE_G;
 	view_info.components.b = VK_COMPONENT_SWIZZLE_B;
@@ -777,20 +780,6 @@ static bool offscreen_render_surface_init_buffers(
 	fb_info.height = height;
 	fb_info.layers = 1;
 
-	if (rs->gbm_dev) {
-		struct wlr_vk_pixel_format_props props;
-		props.format = *vulkan_get_format_from_wl(
-			WL_SHM_FORMAT_ARGB8888);
-		const VkExternalMemoryFeatureFlags importable =
-			VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT;
-		if (!wlr_vk_query_format(dev, &props, img_info.usage,
-				img_info.tiling) || !props.as_dmabuf ||
-				!(props.dma_features & importable)) {
-			wlr_log(WLR_ERROR, "cannot import gbm bo's");
-			return NULL;
-		}
-	}
-
 	// initialize buffers
 	for (unsigned i = 0u; i < 3; ++i) {
 		struct wlr_vk_offscreen_buffer *buf = &rs->buffers[i];
@@ -798,28 +787,53 @@ static bool offscreen_render_surface_init_buffers(
 		VkMemoryAllocateInfo mem_info = {0};
 		unsigned mem_bits = 0xFFFFFFFF;
 
+		// creation extensions
 		VkExternalMemoryImageCreateInfo extimg_info = {0};
 		VkImportMemoryFdInfoKHR import_info = {0};
 		VkMemoryDedicatedAllocateInfo ded_info = {0};
+		VkImageDrmFormatModifierExplicitCreateInfoEXT mod_info = {0};
+		VkSubresourceLayout plane_layouts[WLR_DMABUF_MAX_PLANES] = {0};
 
+		// TODO: does this work with multi-planar format modifiers?
+		// do we have to use vkBindImageMemory2 and VkBindImagePlaneMemoryInfo?
+		// we know that we only need one memory object (only one gbm_bo).
 		if (rs->gbm_dev) {
+			uint64_t gbm_mod;
 			const VkExternalMemoryHandleTypeFlagBits htype =
 				VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
 
-			// we currently need gbm_bo_use_linear to import it into
-			// vulkan with linear layout. Could probably be solved
-			// with the (future) vulkan modifiers extension
-			buf->bo = gbm_bo_create(rs->gbm_dev,
-				width, height, GBM_FORMAT_ARGB8888, rs->flags);
+			// try with modifiers if given
+			if (mod_count) {
+				buf->bo = gbm_bo_create_with_modifiers(rs->gbm_dev,
+					width, height, gbm_fmt, modifiers, mod_count);
+				if (!buf->bo) {
+					wlr_log_errno(WLR_ERROR, "gbm_bo_create_with_modifiers");
+					// try again below without modifiers
+				} else {
+					// store the used modifier and make sure we create the
+					// other buffers with the same modifier
+					gbm_mod = gbm_bo_get_modifier(buf->bo);
+					rs->modifier = gbm_mod;
+					modifiers = &rs->modifier;
+					mod_count = 1;
+				}
+			}
+
 			if (!buf->bo) {
-				wlr_log(WLR_ERROR, "Failed to create gbm_bo");
-				return false;
+				buf->bo = gbm_bo_create(rs->gbm_dev, width, height, gbm_fmt,
+					use_flags);
+				gbm_mod = gbm_bo_get_modifier(buf->bo);
+			}
+
+			if (!buf->bo) {
+				wlr_log_errno(WLR_ERROR, "Failed to create gbm_bo");
+				goto error;
 			}
 
 			int fd = gbm_bo_get_fd(buf->bo);
 			if (fd < 0) {
-				wlr_log(WLR_ERROR, "Failed to retrieve gbm_bo fd");
-				return false;
+				wlr_log_errno(WLR_ERROR, "Failed to retrieve gbm_bo fd");
+				goto error;
 			}
 
 			// manipulate creation infos
@@ -839,12 +853,48 @@ static bool offscreen_render_surface_init_buffers(
 
 			ded_info.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
 			import_info.pNext = &ded_info;
+
+			if (vulkan_has_extension(dev->extension_count, dev->extensions,
+					VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME)) {
+
+				struct wlr_vk_format_modifier_props *mp =
+					wlr_vk_format_props_find_modifier(&rs->format, gbm_mod);
+				if (!mp) {
+					// this might happen if we had to fall back on usage flags
+					// but have the vulkan extension available to at least
+					// prevent trying to import an unsupported modifier
+					wlr_log(WLR_ERROR, "incompatible gbm_bo modifier");
+					goto error;
+				}
+
+				unsigned plane_count = gbm_bo_get_plane_count(buf->bo);
+				assert(mp->props.drmFormatModifierPlaneCount == plane_count);
+
+				for (unsigned i = 0u; i < plane_count; ++i) {
+					plane_layouts[i].offset = gbm_bo_get_offset(buf->bo, i);
+					plane_layouts[i].rowPitch = gbm_bo_get_stride_for_plane(buf->bo, i);
+					plane_layouts[i].size = 0;
+				}
+
+				mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_EXCPLICIT_DRM_FORMAT_MODIFIER_CREATE_INFO_EXT;
+				mod_info.drmFormatModifierPlaneCount = plane_count;
+				mod_info.drmFormatModifier = rs->modifier;
+				mod_info.pPlaneLayouts = plane_layouts;
+				extimg_info.pNext = &mod_info;
+
+				img_info.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+			} else {
+				// we were forced previously to use the linear format modifier
+				// and now importing it as linear image into vulkan is not
+				// guaranteed to work but our best bet (and usually works)
+				img_info.tiling = VK_IMAGE_TILING_LINEAR;
+			}
 		}
 
 		res = vkCreateImage(dev->dev, &img_info, NULL, &buf->buffer.image);
 		if (res != VK_SUCCESS) {
 			wlr_vk_error("vkCreateImage (import)", res);
-			return false;
+			goto error;
 		}
 
 		ded_info.image = buf->buffer.image;
@@ -862,15 +912,14 @@ static bool offscreen_render_surface_init_buffers(
 
 		res = vkAllocateMemory(dev->dev, &mem_info, NULL, &buf->memory);
 		if (res != VK_SUCCESS) {
-			wlr_vk_error("vkAllocateMemory (import)", res);
-			return false;
+			wlr_vk_error("vkAllocateMemory", res);
+			goto error;
 		}
 
-		res = vkBindImageMemory(dev->dev, buf->buffer.image,
-			buf->memory, 0);
+		res = vkBindImageMemory(dev->dev, buf->buffer.image, buf->memory, 0);
 		if (res != VK_SUCCESS) {
-			wlr_vk_error("vkBindMemory (imported)", res);
-			return false;
+			wlr_vk_error("vkBindMemory", res);
+			goto error;
 		}
 
 		view_info.image = buf->buffer.image;
@@ -879,7 +928,7 @@ static bool offscreen_render_surface_init_buffers(
 			&buf->buffer.image_view);
 		if (res != VK_SUCCESS) {
 			wlr_vk_error("vkCreateImageView", res);
-			return false;
+			goto error;
 		}
 
 		fb_info.pAttachments = &buf->buffer.image_view;
@@ -887,11 +936,15 @@ static bool offscreen_render_surface_init_buffers(
 			&buf->buffer.framebuffer);
 		if (res != VK_SUCCESS) {
 			wlr_vk_error("vkCreateFramebuffer", res);
-			return false;
+			goto error;
 		}
 	}
 
 	return true;
+
+error:
+	free(modifiers);
+	return false;
 }
 
 static void offscreen_render_surface_resize(struct wlr_render_surface *wlr_rs,
@@ -905,7 +958,9 @@ static void offscreen_render_surface_resize(struct wlr_render_surface *wlr_rs,
 	offscreen_render_surface_finish_buffers(rs);
 	rs->vk_rs.rs.width = width;
 	rs->vk_rs.rs.height = height;
-	offscreen_render_surface_init_buffers(rs);
+
+	uint32_t c = rs->modifier != DRM_FORMAT_MOD_INVALID;
+	offscreen_render_surface_init_buffers(rs, rs->use_flags, c, &rs->modifier);
 }
 
 static int offscreen_render_surface_buffer_age(
@@ -1020,6 +1075,7 @@ struct wlr_render_surface *vulkan_render_surface_create_headless(
 	rs->vk_rs.renderer = renderer;
 	rs->vk_rs.rs.width = width;
 	rs->vk_rs.rs.height = height;
+	rs->format.format = *vulkan_get_format_from_wl(WL_SHM_FORMAT_ARGB8888);
 	wlr_render_surface_init(&rs->vk_rs.rs, &offscreen_render_surface_impl);
 
 	// command buffer
@@ -1035,7 +1091,8 @@ struct wlr_render_surface *vulkan_render_surface_create_headless(
 		return NULL;
 	}
 
-	if (!offscreen_render_surface_init_buffers(rs)) {
+	// not using gbm so we don't need any usage flags/modifiers
+	if (!offscreen_render_surface_init_buffers(rs, 0, 0, NULL)) {
 		offscreen_render_surface_destroy(&rs->vk_rs.rs);
 		return NULL;
 	}
@@ -1104,7 +1161,8 @@ struct wlr_render_surface *vulkan_render_surface_create_wl(
 
 struct wlr_render_surface *vulkan_render_surface_create_gbm(
 		struct wlr_renderer *wlr_renderer, uint32_t width, uint32_t height,
-		struct gbm_device *gbm_dev, uint32_t flags) {
+		struct gbm_device *gbm_dev, uint32_t format, uint32_t use_flags,
+		uint32_t mod_count, const uint64_t *modifiers) {
 	VkResult res;
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 	if (!vulkan_has_extension(renderer->dev->extension_count,
@@ -1121,14 +1179,62 @@ struct wlr_render_surface *vulkan_render_surface_create_gbm(
 		return NULL;
 	}
 
-	flags |= GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR;
+	uint32_t common_mod_count = 0;
+	uint64_t common_mods[mod_count + 1];
 
+	rs->modifier = DRM_FORMAT_MOD_INVALID;
 	rs->vk_rs.renderer = renderer;
 	rs->vk_rs.rs.width = width;
 	rs->vk_rs.rs.height = height;
-	rs->flags = flags;
 	rs->gbm_dev = gbm_dev;
 	wlr_render_surface_init(&rs->vk_rs.rs, &offscreen_render_surface_impl);
+
+	// query the modifier to use
+	struct wlr_vk_format_props *fmtp = &rs->format;
+	enum wl_shm_format wl_fmt = shm_from_drm_format(format);
+	const struct wlr_vk_format *fmt = vulkan_get_format_from_wl(wl_fmt);
+	if (!fmt) {
+		wlr_log(WLR_ERROR, "Unknown drm format");
+		goto error;
+	}
+
+	fmtp->format = *fmt;
+	VkImageUsageFlags imgusg = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+		VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	if (!wlr_vk_format_props_query(renderer->dev, fmtp, imgusg, false)) {
+		wlr_log(WLR_ERROR, "Cannot import gbm bo's");
+		goto error;
+	}
+
+	// query modifiers we could use
+	for (unsigned i = 0u; i < mod_count; ++i) {
+		struct wlr_vk_format_modifier_props *mp =
+			wlr_vk_format_props_find_modifier(fmtp, modifiers[i]);
+		if (!mp || !(mp->dmabuf_flags & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
+			// mod not supported by vulkan
+			continue;
+		}
+
+		common_mods[common_mod_count++] = modifiers[i];
+	}
+
+	// when there are no common mods, the problem could be that vulkan
+	// does not support the extension or drm does not support in_formats.
+	// In this case using linear format is our best bet, though not
+	// guaranteed to work.
+	if (common_mod_count == 0) {
+		// make sure that dmabufs are supported at all
+		struct wlr_vk_format_modifier_props *mp =
+			wlr_vk_format_props_find_modifier(fmtp, DRM_FORMAT_MOD_INVALID);
+		if (!mp || !(mp->dmabuf_flags & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
+			wlr_log(WLR_ERROR, "Can't import dmabufs with given format");
+			goto error;
+		}
+
+		wlr_log(WLR_INFO, "No common modifiers between vulkan and drm, "
+			"falling back to linear (and hoping it works)");
+		use_flags |= GBM_BO_USE_LINEAR;
+	}
 
 	// command buffer
 	VkCommandBufferAllocateInfo cmd_buf_info = {0};
@@ -1140,21 +1246,30 @@ struct wlr_render_surface *vulkan_render_surface_create_gbm(
 		&rs->vk_rs.cb);
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("vkAllocateCommandBuffers", res);
-		return NULL;
+		goto error;
 	}
 
-	if (!offscreen_render_surface_init_buffers(rs)) {
-		offscreen_render_surface_destroy(&rs->vk_rs.rs);
-		return NULL;
+	if (!offscreen_render_surface_init_buffers(rs,
+			use_flags, common_mod_count, common_mods)) {
+		goto error;
 	}
 
 	rs->back = &rs->buffers[0];
 	return &rs->vk_rs.rs;
+
+error:
+	offscreen_render_surface_destroy(&rs->vk_rs.rs);
+	return NULL;
 }
 
 VkFramebuffer vulkan_render_surface_begin(struct wlr_vk_render_surface *rs,
 		VkCommandBuffer cb) {
 	struct wlr_vk_swapchain_buffer *buffer = NULL;
+	uint32_t src_fam = VK_QUEUE_FAMILY_IGNORED;
+	uint32_t dst_fam = VK_QUEUE_FAMILY_IGNORED;
+	VkImageLayout src_layout;
+	VkImageLayout dst_layout = VK_IMAGE_LAYOUT_GENERAL; // renderpass initial
+
 	if (vulkan_render_surface_is_swapchain(&rs->rs)) {
 		// calling buffer_age will implicitly acquire the next image,
 		// if not already done so
@@ -1167,18 +1282,30 @@ VkFramebuffer vulkan_render_surface_begin(struct wlr_vk_render_surface *rs,
 
 		assert(srs->current_id < (int) srs->swapchain.image_count);
 		buffer = &srs->swapchain.buffers[srs->current_id];
+
+		src_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	} else {
 		struct wlr_vk_offscreen_render_surface *ors =
 			vulkan_get_render_surface_offscreen(&rs->rs);
 		buffer = &ors->back->buffer;
+		src_layout = VK_IMAGE_LAYOUT_GENERAL;
+
+		if (ors->gbm_dev) {
+			src_fam = VK_QUEUE_FAMILY_FOREIGN_EXT;
+			dst_fam = rs->renderer->graphics_queue.family;
+		}
 	}
 
 	if (buffer->age == 0) {
-		vulkan_change_layout(cb, buffer->image,
-			VK_IMAGE_LAYOUT_UNDEFINED, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
-			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0);
-		buffer->layout_changed = true;
+		src_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+	}
+
+	if (src_layout != dst_layout || src_fam != dst_fam) {
+		// TODO: stage, access flags
+		vulkan_change_layout_queue(cb, buffer->image,
+			src_layout, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+			dst_layout, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+			src_fam, dst_fam);
 	}
 
 	return buffer->framebuffer;
@@ -1188,10 +1315,34 @@ void vulkan_render_surface_end(struct wlr_vk_render_surface *rs,
 		VkSemaphore *wait, VkSemaphore *signal) {
 	*wait = *signal = VK_NULL_HANDLE;
 
+	VkImage img;
+	uint32_t src_fam = VK_QUEUE_FAMILY_IGNORED;
+	uint32_t dst_fam = VK_QUEUE_FAMILY_IGNORED;
+	VkImageLayout src_layout = VK_IMAGE_LAYOUT_GENERAL; // renderpass final
+	VkImageLayout dst_layout;
+
 	if (vulkan_render_surface_is_swapchain(&rs->rs)) {
 		struct wlr_vk_swapchain_render_surface *srs =
 			vulkan_get_render_surface_swapchain(&rs->rs);
 		*wait = srs->acquire;
 		*signal = srs->present;
+
+		dst_layout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		img = srs->swapchain.buffers[srs->current_id].image;
+	} else {
+		struct wlr_vk_offscreen_render_surface *ors =
+			vulkan_get_render_surface_offscreen(&rs->rs);
+		dst_layout = VK_IMAGE_LAYOUT_GENERAL;
+		src_fam = rs->renderer->graphics_queue.family;
+		dst_fam = VK_QUEUE_FAMILY_FOREIGN_EXT;
+		img = ors->back->buffer.image;
+	}
+
+	if (src_layout != dst_layout || src_fam != dst_fam) {
+		// TODO: access flags, stage
+		vulkan_change_layout_queue(rs->cb, img,
+			src_layout, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+			dst_layout, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0,
+			src_fam, dst_fam);
 	}
 }

@@ -253,12 +253,6 @@ struct wlr_texture *wlr_gles2_texture_from_dmabuf(struct wlr_egl *egl,
 		return NULL;
 	}
 
-	if (!egl->exts.image_dmabuf_import_ext) {
-		wlr_log(WLR_ERROR, "Cannot create DMA-BUF texture: EGL extension "
-			"unavailable");
-		return NULL;
-	}
-
 	switch (attribs->format & ~DRM_FORMAT_BIG_ENDIAN) {
 	case WL_SHM_FORMAT_YUYV:
 	case WL_SHM_FORMAT_YVYU:

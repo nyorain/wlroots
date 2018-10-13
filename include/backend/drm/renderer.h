@@ -24,10 +24,12 @@ void finish_drm_renderer(struct wlr_drm_renderer *renderer);
 struct gbm_bo *get_drm_render_surface_front(struct wlr_renderer *renderer,
 		struct wlr_render_surface *surf);
 bool init_drm_render_surface(struct wlr_render_surface **surf,
-		struct wlr_drm_renderer *renderer, uint32_t width, uint32_t height,
-		uint32_t flags);
+	struct wlr_drm_renderer *renderer, uint32_t width, uint32_t height,
+	uint32_t format, uint32_t flags, uint32_t modifier_count,
+	const uint64_t *modifiers);
 bool init_drm_plane_surfaces(struct wlr_drm_plane *plane,
-	struct wlr_drm_backend *drm, int32_t width, uint32_t height);
+	struct wlr_drm_backend *drm, int32_t width, uint32_t height,
+	uint32_t format);
 struct gbm_bo *copy_drm_surface_mgpu(struct wlr_drm_renderer *renderer,
 	struct wlr_render_surface *dest, struct gbm_bo *src);
 bool export_drm_bo(struct gbm_bo *bo, struct wlr_dmabuf_attributes *attribs);

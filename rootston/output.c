@@ -490,7 +490,11 @@ static void render_output(struct roots_output *output) {
 		goto damage_finish;
 	}
 
-	wlr_renderer_begin_output(renderer, output->wlr_output);
+	if (!wlr_renderer_begin_output(renderer, output->wlr_output)) {
+		wlr_log(WLR_ERROR, "Failed to begin rendering, skipping frame");
+		goto damage_finish;
+	}
+
 	if (!pixman_region32_not_empty(&damage)) {
 		// Output isn't damaged but needs buffer swap
 		goto renderer_end;
@@ -772,7 +776,7 @@ static void set_mode(struct wlr_output *output,
 		wlr_log(WLR_ERROR, "Configured mode for %s not available", output->name);
 	} else {
 		wlr_log(WLR_DEBUG, "Assigning configured mode to %s", output->name);
-		wlr_output_set_mode(output, best);
+		wlr_output_set_mode(output, best); // TODO: handle error
 	}
 }
 

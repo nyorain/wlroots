@@ -134,11 +134,26 @@ static const struct wlr_render_surface_impl render_surface_impl = {
 // gles2_gbm_render_surface
 static bool gles2_gbm_render_surface_init(
 		struct wlr_gles2_gbm_render_surface *rs) {
-	rs->gbm_surface = gbm_surface_create(rs->gbm_dev, rs->gles2_rs.rs.width,
-		rs->gles2_rs.rs.height, GBM_FORMAT_ARGB8888, rs->flags);
+	if (rs->mod_count > 0) {
+		rs->gbm_surface = gbm_surface_create_with_modifiers(rs->gbm_dev,
+			rs->gles2_rs.rs.width, rs->gles2_rs.rs.height, rs->format,
+			rs->modifiers, rs->mod_count);
+		if (!rs->gbm_surface) {
+			wlr_log_errno(WLR_ERROR, "Failed to create GBM surface with mods");
+			free(rs->modifiers);
+			rs->mod_count = 0;
+			rs->modifiers = NULL;
+			// trying again with usage flags instead
+		}
+	}
+
 	if (!rs->gbm_surface) {
-		wlr_log_errno(WLR_ERROR, "Failed to create GBM surface");
-		return false;
+		rs->gbm_surface = gbm_surface_create(rs->gbm_dev, rs->gles2_rs.rs.width,
+			rs->gles2_rs.rs.height, rs->format, rs->flags);
+		if (!rs->gbm_surface) {
+			wlr_log_errno(WLR_ERROR, "Failed to create GBM surface");
+			return false;
+		}
 	}
 
 	rs->gles2_rs.surface = wlr_egl_create_surface(&rs->gles2_rs.renderer->egl,
@@ -165,6 +180,7 @@ static void gles2_gbm_render_surface_destroy(
 	struct wlr_gles2_gbm_render_surface *rs =
 		gles2_get_render_surface_gbm(wlr_rs);
 	gles2_gbm_render_surface_finish(rs);
+	free(rs->modifiers);
 	free(rs);
 }
 
@@ -296,11 +312,25 @@ struct wlr_render_surface *gles2_render_surface_create_wl(
 
 struct wlr_render_surface *gles2_render_surface_create_gbm(
 		struct wlr_renderer *renderer, uint32_t width, uint32_t height,
-		struct gbm_device *gbm_dev, uint32_t flags) {
+		struct gbm_device *gbm_dev, uint32_t format, uint32_t use_flags,
+		uint32_t mod_count, const uint64_t *modifiers) {
+
 	struct wlr_gles2_gbm_render_surface *rs = calloc(1, sizeof(*rs));
 	if (!rs) {
 		wlr_log(WLR_ERROR, "Allocation failed");
 		return NULL;
+	}
+
+	if (mod_count && (mod_count > 0 || modifiers[0] != DRM_FORMAT_MOD_INVALID)) {
+		rs->modifiers = calloc(mod_count, sizeof(*rs->modifiers));
+		if (!rs->modifiers) {
+			wlr_log(WLR_ERROR, "Allocation failed");
+			free(rs);
+			return NULL;
+		}
+
+		memcpy(rs->modifiers, modifiers, mod_count * sizeof(*rs->modifiers));
+		rs->mod_count = mod_count;
 	}
 
 	rs->gles2_rs.renderer = gles2_get_renderer(renderer);
@@ -309,7 +339,8 @@ struct wlr_render_surface *gles2_render_surface_create_gbm(
 	wlr_render_surface_init(&rs->gles2_rs.rs, &gbm_render_surface_impl);
 
 	rs->gbm_dev = gbm_dev;
-	rs->flags = flags;
+	rs->flags = use_flags | GBM_BO_USE_RENDERING;
+	rs->format = format;
 
 	if (!gles2_gbm_render_surface_init(rs)) {
 		free(rs);

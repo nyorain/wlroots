@@ -16,13 +16,14 @@ struct wlr_render_surface *wlr_render_surface_create_headless(
 
 struct wlr_render_surface *wlr_render_surface_create_gbm(
 		struct wlr_renderer *renderer, uint32_t width, uint32_t height,
-		void *gbm_device, uint32_t gbm_use_flags) {
+		void *gbm_device, uint32_t format, uint32_t use_flags,
+		uint32_t modifier_count, const uint64_t *modifiers) {
 	if (!renderer->impl->render_surface_create_gbm) {
 		return NULL;
 	}
 
 	return renderer->impl->render_surface_create_gbm(renderer, width, height,
-		gbm_device, gbm_use_flags);
+		gbm_device, format, use_flags, modifier_count, modifiers);
 }
 
 struct wlr_render_surface *wlr_render_surface_create_xcb(

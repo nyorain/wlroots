@@ -17,6 +17,12 @@
 #include "properties.h"
 #include "renderer.h"
 
+struct wlr_drm_format {
+	uint32_t format;
+	uint32_t modifier_count;
+	uint64_t *modifiers;
+};
+
 struct wlr_drm_plane {
 	uint32_t type;
 	uint32_t id;
@@ -33,6 +39,8 @@ struct wlr_drm_plane {
 	int32_t cursor_hotspot_x, cursor_hotspot_y;
 
 	union wlr_drm_plane_props props;
+	uint32_t format_count;
+	struct wlr_drm_format *formats;
 };
 
 struct wlr_drm_crtc {

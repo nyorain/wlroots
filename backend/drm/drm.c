@@ -72,6 +72,65 @@ static int cmp_plane(const void *arg1, const void *arg2) {
 	return (int)a->type - (int)b->type;
 }
 
+static bool query_plane_formats(struct wlr_drm_backend *drm,
+		struct wlr_drm_plane *p, drmModePlane *plane) {
+	p->format_count = plane->count_formats;
+	p->formats = calloc(p->format_count, sizeof(*p->formats));
+	if (!p->formats) {
+		wlr_log_errno(WLR_ERROR, "Allocation failed");
+		return false;
+	}
+
+	// try the IN_FORMATS property
+	size_t ret_len = 0;
+	void *data = get_drm_prop_blob(drm->fd, p->id, p->props.in_formats,
+		&ret_len);
+	struct drm_format_modifier_blob *format_blob = data;
+
+	if (format_blob && ret_len >= sizeof(*format_blob)) {
+		uint64_t fmt_mods[format_blob->count_modifiers];
+		assert(format_blob->count_formats == p->format_count);
+		struct drm_format_modifier *modifiers = (struct drm_format_modifier *)
+			(((char *)data) + format_blob->modifiers_offset);
+		uint32_t *formats = (uint32_t *)
+			(((char *)data) + format_blob->formats_offset);
+
+		for (unsigned i = 0; i < p->format_count; i++) {
+			p->formats[i].format = formats[i];
+
+			for (unsigned j = 0; j < format_blob->count_modifiers; j++) {
+				struct drm_format_modifier *mod = &modifiers[j];
+				if ((i < mod->offset) || (i > mod->offset + 63) ||
+						!(mod->formats & (1 << (i - mod->offset)))) {
+					continue;
+				}
+
+				uint64_t index = ++p->formats[i].modifier_count;
+				fmt_mods[index] = mod->modifier;
+			}
+
+			p->formats[i].modifiers = calloc(p->formats[i].modifier_count,
+				sizeof(*p->formats[i].modifiers));
+			if (!p->formats[i].modifiers) {
+				wlr_log_errno(WLR_ERROR, "Allocation failed");
+				free(data);
+				return false;
+			}
+
+			memcpy(p->formats[i].modifiers, fmt_mods,
+				p->formats[i].modifier_count * sizeof(fmt_mods[0]));
+		}
+
+		free(data);
+	} else { // fallback to old formats without modifiers
+		for (unsigned i = 0; i < p->format_count; ++i) {
+			p->formats[i].format = plane->formats[i];
+		}
+	}
+
+	return true;
+}
+
 static bool init_planes(struct wlr_drm_backend *drm) {
 	drmModePlaneRes *plane_res = drmModeGetPlaneResources(drm->fd);
 	if (!plane_res) {
@@ -108,6 +167,12 @@ static bool init_planes(struct wlr_drm_backend *drm) {
 
 		if (!get_drm_plane_props(drm->fd, p->id, &p->props) ||
 				!get_drm_prop(drm->fd, p->id, p->props.type, &type)) {
+			wlr_log(WLR_ERROR, "Failed to retrieve drm props for plane %zu", i);
+			drmModeFreePlane(plane);
+			goto error_planes;
+		}
+
+		if (!query_plane_formats(drm, p, plane)) {
 			drmModeFreePlane(plane);
 			goto error_planes;
 		}
@@ -135,6 +200,9 @@ static bool init_planes(struct wlr_drm_backend *drm) {
 	return true;
 
 error_planes:
+	for (size_t i = 0; i < drm->num_planes; ++i) {
+		free(drm->planes[i].formats);
+	}
 	free(drm->planes);
 error_res:
 	drmModeFreePlaneResources(plane_res);
@@ -206,6 +274,7 @@ void finish_drm_resources(struct wlr_drm_backend *drm) {
 		if (plane->cursor_bo) {
 			gbm_bo_destroy(plane->cursor_bo);
 		}
+		free(plane->formats);
 	}
 
 	free(drm->crtcs);
@@ -505,7 +574,7 @@ static bool drm_connector_set_mode(struct wlr_output *output,
 		conn->output.name, mode->width, mode->height, mode->refresh);
 
 	if (!init_drm_plane_surfaces(conn->crtc->primary, drm,
-			mode->width, mode->height)) {
+			mode->width, mode->height, GBM_FORMAT_XRGB8888)) {
 		wlr_log(WLR_ERROR, "Failed to initialize renderer for plane");
 		return false;
 	}
@@ -590,7 +659,12 @@ static bool drm_connector_set_cursor(struct wlr_output *output,
 		ret = drmGetCap(drm->fd, DRM_CAP_CURSOR_HEIGHT, &h);
 		h = ret ? 64 : h;
 
-		if (!init_drm_render_surface(&plane->surf, renderer, w, h, 0)) {
+		// TODO: we could try to use a single bo for rendering and cursor
+		// output first. If that fails we can still fall back to this
+		// approach. Or implement direct texture reading and therefore
+		// remove the need for this temporary render surface
+		if (!init_drm_render_surface(&plane->surf, renderer, w, h,
+				GBM_FORMAT_ARGB8888, GBM_BO_USE_LINEAR, 0, NULL)) {
 			wlr_log(WLR_ERROR, "Cannot allocate cursor resources");
 			return false;
 		}
@@ -959,7 +1033,7 @@ static void realloc_crtcs(struct wlr_drm_backend *drm, bool *changed_outputs) {
 		}
 
 		if (!init_drm_plane_surfaces(conn->crtc->primary, drm,
-				mode->width, mode->height)) {
+				mode->width, mode->height, GBM_FORMAT_XRGB8888)) {
 			wlr_log(WLR_ERROR, "Failed to initialize renderer for plane");
 			drm_connector_cleanup(conn);
 			break;

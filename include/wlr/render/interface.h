@@ -58,7 +58,8 @@ struct wlr_renderer_impl {
 
 	struct wlr_render_surface *(*render_surface_create_gbm)(
 		struct wlr_renderer *renderer, uint32_t width, uint32_t height,
-		struct gbm_device *device, uint32_t use_flags);
+		struct gbm_device *device, uint32_t format, uint32_t use_flags,
+		uint32_t modifier_count, const uint64_t *possible_modifiers);
 	struct wlr_render_surface *(*render_surface_create_headless)(
 		struct wlr_renderer *renderer, uint32_t width, uint32_t height);
 	struct wlr_render_surface *(*render_surface_create_xcb)(

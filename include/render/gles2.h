@@ -97,7 +97,10 @@ struct wlr_gles2_render_surface {
 struct wlr_gles2_gbm_render_surface {
 	struct wlr_gles2_render_surface gles2_rs;
 	struct gbm_device *gbm_dev;
+	uint32_t format;
 	uint32_t flags;
+	uint32_t mod_count;
+	uint64_t *modifiers;
 
 	struct gbm_surface *gbm_surface;
 	struct gbm_bo *front_bo;
@@ -125,7 +128,8 @@ struct wlr_render_surface *gles2_render_surface_create_wl(
 	struct wl_display *disp, struct wl_surface *surf);
 struct wlr_render_surface *gles2_render_surface_create_gbm(
 	struct wlr_renderer *renderer, uint32_t width, uint32_t height,
-	struct gbm_device *gbm_dev, uint32_t flags);
+	struct gbm_device *gbm_dev, uint32_t format, uint32_t use_flags,
+	uint32_t mod_count, const uint64_t *modifiers);
 
 void push_gles2_marker(const char *file, const char *func);
 void pop_gles2_marker(void);

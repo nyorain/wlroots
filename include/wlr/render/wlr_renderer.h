@@ -92,12 +92,16 @@ bool wlr_renderer_resource_is_wl_drm_buffer(struct wlr_renderer *renderer,
 void wlr_renderer_wl_drm_buffer_get_size(struct wlr_renderer *renderer,
 	struct wl_resource *buffer, int *width, int *height);
 /**
- * Get the available dmabuf formats
+ * Get the available dmabuf formats (that can be imported).
+ * Returns the number of formats returned in *formats or a negative
+ * value on error. The caller must free *formats.
  */
 int wlr_renderer_get_dmabuf_formats(struct wlr_renderer *renderer,
 	int **formats);
 /**
- * Get the available dmabuf modifiers for a given format
+ * Get the available dmabuf modifiers for a given format (that can be imported).
+ * Returns the number of modifiers returned in *modifiers or a negative
+ * value on error. The caller must free *modifiers
  */
 int wlr_renderer_get_dmabuf_modifiers(struct wlr_renderer *renderer, int format,
 	uint64_t **modifiers);

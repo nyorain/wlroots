@@ -50,6 +50,13 @@ static VkBool32 debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 		// notifies us that shader output is not consumed since
 		// we use the shared vertex buffer with uv output
 		"UNASSIGNED-CoreValidation-Shader-OutputNotConsumed",
+		// always warns for queue_external/foreign transitions
+		// fixed in https://github.com/KhronosGroup/Vulkan-ValidationLayers/pull/311,
+		// no release with that in
+		"UNASSIGNED-VkImageMemoryBarrier-image-00004",
+		// pretty sure this is a bug, nagging us about external image
+		// realease/acquire. TODO: investigate/report upstream
+		"UNASSIGNED-VkImageMemoryBarrier-image-00003",
 	};
 
 	if (debug_data->pMessageIdName) {
@@ -315,7 +322,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	wl_list_init(&dev->link);
 	dev->phdev = phdev;
 	dev->instance = ini;
-	dev->extensions = calloc(5 + ext_count, sizeof(*ini->extensions));
+	dev->extensions = calloc(7 + ext_count, sizeof(*ini->extensions));
 	if (!dev->extensions) {
 		wlr_log_errno(WLR_ERROR, "allocation failed");
 		goto error;
@@ -340,30 +347,56 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
 			dev->extensions[dev->extension_count++] = name;
 		}
-	} else {
-		wlr_log(WLR_INFO, "VK_KHR_SWAPCHAIN not supported");
 	}
 
-	name = VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME;
-	if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
-		dev->extensions[dev->extension_count++] = name;
+	// for dmabuf/drm importing we require at least the
+	// 'external_memory_fd, external_memory_dma_buf, queue_family_foreign'
+	// extensions. So only enable them if all three are available (assumption
+	// throughout the codebase).
+	// Strictly speaking importing images is only possible with the drm mod
+	// extension as well, when it's supported in common drivers remove the
+	// legacy (without modifiers) image dmabuf import code (not guaranteed
+	// to work; guessing) and require it as well for importing support
+	const char *names[] = {
+		VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+		VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
+#ifdef WLR_VK_FOREIGN_QF
+		VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+#endif
+	};
+	unsigned nc = sizeof(names) / sizeof(names[0]);
+	bool has_dmabuf = false;
+	if (find_extensions(avail_ext_props, avail_extc, names, nc) == NULL) {
+		has_dmabuf = true;
+		for (unsigned i = 0u; i < nc; ++i) {
+			dev->extensions[dev->extension_count++] = names[i];
+		}
 
-		name = VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME;
+		// doesn't strictly depend on any of the two but we have no
+		// use for this without the dma_buf extension
+		name = VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME;
 		if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
 			dev->extensions[dev->extension_count++] = name;
-		} else {
-			wlr_log(WLR_INFO, "VK_EXT_EXTERNAL_MEMORY_DMA_BUF not supported");
 		}
 	} else {
-		wlr_log(WLR_INFO, "VK_KHR_EXTERNAL_MEMORY_FD not supported");
+		wlr_log(WLR_ERROR, "dmabuf extensions no found, Vulkan renderer will "
+			"have no support for importing external dma/wl_drm buffers");
 	}
 
 	name = VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME;
 	if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
 		dev->extensions[dev->extension_count++] = name;
-	} else {
-		wlr_log(WLR_INFO, "vk_khr_increment_present extension not supported");
 	}
+
+	// check/enable features
+	VkPhysicalDeviceFeatures2 features = {0};
+	features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+	VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr_features = {0};
+	ycbcr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
+	features.pNext = &ycbcr_features;
+	vkGetPhysicalDeviceFeatures2(phdev, &features);
+	dev->features.ycbcr = ycbcr_features.samplerYcbcrConversion;
+	wlr_log(WLR_INFO, "YCbCr device feature: %d", dev->features.ycbcr);
 
 	{
 		float prio = 1.f;
@@ -377,6 +410,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		}
 
 		VkDeviceCreateInfo dev_info = {0};
+		dev_info.pNext = &ycbcr_features;
 		dev_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		dev_info.queueCreateInfoCount = queue_count;
 		dev_info.pQueueCreateInfos = qinfos;
@@ -404,12 +438,14 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	memcpy(dev->queues, queue_families, sizeof(*dev->queues) * queue_count);
 
 	// load api
-	dev->api.getMemoryFdPropertiesKHR =
-		(PFN_vkGetMemoryFdPropertiesKHR) vkGetDeviceProcAddr(
-				dev->dev, "vkGetMemoryFdPropertiesKHR");
-	if (!dev->api.getMemoryFdPropertiesKHR) {
-		wlr_log(WLR_ERROR, "Failed to retrieve required dev function pointers");
-		goto error;
+	if (has_dmabuf) {
+		dev->api.getMemoryFdPropertiesKHR =
+			(PFN_vkGetMemoryFdPropertiesKHR) vkGetDeviceProcAddr(
+					dev->dev, "vkGetMemoryFdPropertiesKHR");
+		if (!dev->api.getMemoryFdPropertiesKHR) {
+			wlr_log(WLR_ERROR, "Failed to retrieve required dev func pointers");
+			goto error;
+		}
 	}
 
 	wl_list_insert(&ini->devices, &dev->link);

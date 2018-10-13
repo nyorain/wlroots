@@ -68,6 +68,10 @@ struct wlr_vk_device {
 	struct {
 		PFN_vkGetMemoryFdPropertiesKHR getMemoryFdPropertiesKHR;
 	} api;
+
+	struct {
+		bool ycbcr; // Y'CbCr samplers enabled
+	} features;
 };
 
 // Creates a device for the given instance and physical devices (which must
@@ -88,34 +92,58 @@ void wlr_vk_device_destroy(struct wlr_vk_device *dev);
 int wlr_vk_find_mem_type(struct wlr_vk_device *device,
 	VkMemoryPropertyFlags flags, uint32_t req_bits);
 
+struct wlr_vk_format_plane {
+	unsigned bpb; // bits per block; num_blocks_per_row = width / hsub
+	unsigned hsub; // subsampling x (horizontal)
+	unsigned vsub; // subsampling y (vertical)
+};
 
-struct wlr_vk_pixel_format {
+struct wlr_vk_format {
 	uint32_t wl_format; // except {a,x}rgb also the drm format
 	VkFormat vk_format;
-	int bpp;
 	bool has_alpha;
+	bool ycbcr; // whether it requires a ycbcr sampler
+	unsigned plane_count;
+	struct wlr_vk_format_plane planes[WLR_DMABUF_MAX_PLANES];
 };
 
 // Returns all known format mappings.
 // Might not be supported for gpu/usecase.
-const struct wlr_vk_pixel_format *vulkan_get_format_list(size_t *len);
-const struct wlr_vk_pixel_format *vulkan_get_format_from_wl(
+const struct wlr_vk_format *vulkan_get_format_list(size_t *len);
+const struct wlr_vk_format *vulkan_get_format_from_wl(
 	enum wl_shm_format fmt);
 
-struct wlr_vk_pixel_format_props {
-	struct wlr_vk_pixel_format format;
+struct wlr_vk_format_modifier_props {
+	VkDrmFormatModifierPropertiesEXT props;
+	VkExternalMemoryFeatureFlags dmabuf_flags;
 	VkExtent2D max_extent;
-	bool as_dmabuf; // whether it's compatible with dmabuf
-	VkExternalMemoryFeatureFlagBits dma_features;
+	bool export_imported;
+};
+
+struct wlr_vk_format_props {
+	struct wlr_vk_format format;
+	VkExtent2D max_extent; // if not created as dma_buf
+	VkFormatFeatureFlags features; // if not created as dma_buf
+
+	uint32_t modifier_count; // if > 0: can be used with dma_buf
+	struct wlr_vk_format_modifier_props *modifiers;
 };
 
 // Returns whether the format given in `props->format` can be used on the given
-// device with the given usage/tiling. If supported,
-// will fill out the passed properties.
-bool wlr_vk_query_format(struct wlr_vk_device *dev,
-	struct wlr_vk_pixel_format_props *format, VkImageUsageFlags usage,
-	VkImageTiling tiling);
+// device with the given usage/tiling. If supported, will fill out the passed
+// properties.
+bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
+	struct wlr_vk_format_props *format, VkImageUsageFlags usage,
+	bool prefer_linear);
+struct wlr_vk_format_modifier_props *wlr_vk_format_props_find_modifier(
+	struct wlr_vk_format_props *props, uint64_t mod);
+void wlr_vk_format_props_finish(struct wlr_vk_format_props *props);
 
+struct wlr_vk_ycbcr_sampler {
+	VkFormat format;
+	VkSampler sampler;
+	VkSamplerYcbcrConversion conversion;
+};
 
 // Vulkan wlr_renderer implementation on top of a wlr_vk_device.
 struct wlr_vk_renderer {
@@ -134,18 +162,28 @@ struct wlr_vk_renderer {
 	VkFence fence;
 	VkFormat format; // used in renderpass
 
+	// current frame id. Used in wlr_vk_texture.last_used
+	// Increased every time a frame is ended for the renderer
+	uint32_t frame;
+
 	struct wlr_vk_queue graphics_queue;
 	struct wlr_vk_queue present_queue;
 
 	struct wlr_vk_render_surface *current;
 	VkRect2D scissor; // needed for clearing
 
-	uint32_t format_count; // number of supported formats below
+	// supported formats for textures (contains only those formats
+	// that support everything we need for textures)
+	uint32_t format_count;
 	enum wl_shm_format *wl_formats;
-	struct wlr_vk_pixel_format_props *formats;
+	struct wlr_vk_format_props *formats;
 
 	size_t last_pool_size;
 	struct wl_list descriptor_pools; // type wlr_vk_descriptor_pool
+	struct wl_array ycbcr_samplers; // type wlr_vk_ycbcr_sampler
+
+	struct wl_list destroy_textures; // textures to destroy after frame
+	struct wl_list foreign_textures; // texture to return to foreign queue
 
 	struct {
 		VkCommandBuffer cb;
@@ -153,7 +191,6 @@ struct wlr_vk_renderer {
 
 		bool recording;
 		struct wl_list buffers; // type wlr_vk_shared_buffer
-		uint32_t frame;
 	} stage;
 
 	bool host_images; // whether to allocate images on host memory
@@ -188,7 +225,7 @@ struct wlr_vk_descriptor_pool *wlr_vk_alloc_texture_ds(
 // Frees the given descriptor set from the pool its pool.
 void wlr_vk_free_ds(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_descriptor_pool *pool, VkDescriptorSet ds);
-struct wlr_vk_pixel_format_props *wlr_vk_format_from_wl(
+struct wlr_vk_format_props *wlr_vk_format_from_wl(
 	struct wlr_vk_renderer *renderer, enum wl_shm_format format);
 struct wlr_vk_renderer *vulkan_get_renderer(struct wlr_renderer *r);
 
@@ -196,22 +233,27 @@ struct wlr_vk_renderer *vulkan_get_renderer(struct wlr_renderer *r);
 struct wlr_vk_texture {
 	struct wlr_texture wlr_texture;
 	struct wlr_vk_renderer *renderer;
-	VkDeviceMemory memory;
+	uint32_t mem_count;
+	VkDeviceMemory memories[WLR_DMABUF_MAX_PLANES];
 	VkImage image;
 	VkImageView image_view;
-	const struct wlr_vk_pixel_format *format;
+	const struct wlr_vk_format *format;
 	uint32_t width;
 	uint32_t height;
 	VkDescriptorSet ds;
 	struct wlr_vk_descriptor_pool *ds_pool;
-	uint32_t last_written;
+	uint32_t last_used;
+	bool dmabuf_imported;
+	bool owned; // if dmabuf_imported: whether we have ownership of the image
+	struct wl_list foreign_link;
+	struct wl_list destroy_link;
 };
 
 struct wlr_vk_texture *vulkan_get_texture(struct wlr_texture *wlr_texture);
 
 struct wlr_vk_descriptor_pool {
 	VkDescriptorPool pool;
-	uint32_t free;
+	uint32_t free; // number of textures that can be allocated
 	struct wl_list link;
 };
 
@@ -252,7 +294,6 @@ struct wlr_vk_swapchain_buffer {
 	VkImageView image_view;
 	VkFramebuffer framebuffer;
 	int age;
-	bool layout_changed;
 };
 
 // Vulkan swapchain with retrieved buffers and rendering data.
@@ -283,14 +324,22 @@ struct wlr_vk_swapchain_render_surface {
 // for the current front buffer
 struct wlr_vk_offscreen_render_surface {
 	struct wlr_vk_render_surface vk_rs;
+
+	// only if used with gbm
 	struct gbm_device *gbm_dev;
-	uint32_t flags;
+	uint32_t use_flags;
+	struct wlr_vk_format_props format;
+	uint64_t modifier;
 
 	struct wlr_vk_offscreen_buffer {
-		struct gbm_bo *bo; // optional
+		struct gbm_bo *bo; // only if used with gbm
 		VkDeviceMemory memory;
 		struct wlr_vk_swapchain_buffer buffer;
 	} buffers[3];
+
+	// TODO: we probably only need 2 buffers since the drm backend
+	// makes sure that renderer_begin is never called before the pageflip
+	// completed
 
 	// we have 3 different buffers:
 	// - one to render to that is currently not read/presented (back)
@@ -314,7 +363,8 @@ struct wlr_render_surface *vulkan_render_surface_create_wl(
 	struct wl_display *disp, struct wl_surface *surf);
 struct wlr_render_surface *vulkan_render_surface_create_gbm(
 	struct wlr_renderer *renderer, uint32_t width, uint32_t height,
-	struct gbm_device *gbm_dev, uint32_t flags);
+	struct gbm_device *gbm_dev, uint32_t format, uint32_t use_flags,
+	uint32_t mod_count, const uint64_t *modifiers);
 
 VkFramebuffer vulkan_render_surface_begin(struct wlr_vk_render_surface *rs,
 	VkCommandBuffer cb);
@@ -327,12 +377,21 @@ struct wlr_vk_render_surface *vulkan_get_render_surface(
 // util
 bool vulkan_has_extension(unsigned count, const char **exts, const char *find);
 const char *vulkan_strerror(VkResult err);
+enum wl_shm_format shm_from_drm_format(uint32_t drm_format);
+uint32_t drm_from_shm_format(enum wl_shm_format wl_format);
 void vulkan_change_layout(VkCommandBuffer cb, VkImage img,
 	VkImageLayout ol, VkPipelineStageFlags srcs, VkAccessFlags srca,
 	VkImageLayout nl, VkPipelineStageFlags dsts, VkAccessFlags dsta);
+void vulkan_change_layout_queue(VkCommandBuffer cb, VkImage img,
+	VkImageLayout ol, VkPipelineStageFlags srcs, VkAccessFlags srca,
+	VkImageLayout nl, VkPipelineStageFlags dsts, VkAccessFlags dsta,
+	uint32_t src_family, uint32_t dst_family);
 
 #define wlr_vk_error(fmt, res, ...) wlr_log(WLR_ERROR, fmt ": %s (%d)", \
 	vulkan_strerror(res), res, ##__VA_ARGS__)
+
+// disable it for now since not supported by mesa drivers
+// #define WLR_VK_FOREIGN_QF
 
 #endif
 

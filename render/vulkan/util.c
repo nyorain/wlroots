@@ -1,5 +1,7 @@
+#include <drm_fourcc.h> // must be before dmabuf.h
 #include <vulkan/vulkan.h>
 #include <render/vulkan.h>
+#include <wlr/util/log.h>
 
 int wlr_vk_find_mem_type(struct wlr_vk_device *dev,
 		VkMemoryPropertyFlags flags, uint32_t req_bits) {
@@ -26,6 +28,7 @@ const char *vulkan_strerror(VkResult err) {
 		ERR_STR(EVENT_SET);
 		ERR_STR(EVENT_RESET);
 		ERR_STR(INCOMPLETE);
+		ERR_STR(SUBOPTIMAL_KHR);
 		ERR_STR(ERROR_OUT_OF_HOST_MEMORY);
 		ERR_STR(ERROR_OUT_OF_DEVICE_MEMORY);
 		ERR_STR(ERROR_INITIALIZATION_FAILED);
@@ -39,19 +42,32 @@ const char *vulkan_strerror(VkResult err) {
 		ERR_STR(ERROR_FORMAT_NOT_SUPPORTED);
 		ERR_STR(ERROR_SURFACE_LOST_KHR);
 		ERR_STR(ERROR_NATIVE_WINDOW_IN_USE_KHR);
-		ERR_STR(SUBOPTIMAL_KHR);
 		ERR_STR(ERROR_OUT_OF_DATE_KHR);
+		ERR_STR(ERROR_FRAGMENTED_POOL);
 		ERR_STR(ERROR_INCOMPATIBLE_DISPLAY_KHR);
 		ERR_STR(ERROR_VALIDATION_FAILED_EXT);
+		ERR_STR(ERROR_INVALID_EXTERNAL_HANDLE);
+		ERR_STR(ERROR_OUT_OF_POOL_MEMORY);
+		ERR_STR(ERROR_INVALID_DRM_FORMAT_MODIFIER_PLANE_LAYOUT_EXT);
 		default:
 			return "<unknown>";
 	}
 	#undef STR
 }
 
-void vulkan_change_layout(VkCommandBuffer cb, VkImage img,
+void vulkan_change_layout_queue(VkCommandBuffer cb, VkImage img,
 		VkImageLayout ol, VkPipelineStageFlags srcs, VkAccessFlags srca,
-		VkImageLayout nl, VkPipelineStageFlags dsts, VkAccessFlags dsta) {
+		VkImageLayout nl, VkPipelineStageFlags dsts, VkAccessFlags dsta,
+		uint32_t src_family, uint32_t dst_family) {
+#ifndef WLR_VK_FOREIGN_QF
+	if (src_family == VK_QUEUE_FAMILY_FOREIGN_EXT) {
+		src_family = VK_QUEUE_FAMILY_EXTERNAL;
+	}
+	if (dst_family == VK_QUEUE_FAMILY_FOREIGN_EXT) {
+		dst_family = VK_QUEUE_FAMILY_EXTERNAL;
+	}
+#endif
+
 	VkImageMemoryBarrier barrier = {0};
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barrier.oldLayout = ol;
@@ -62,8 +78,17 @@ void vulkan_change_layout(VkCommandBuffer cb, VkImage img,
 	barrier.subresourceRange.levelCount = 1;
 	barrier.srcAccessMask = srca;
 	barrier.dstAccessMask = dsta;
+	barrier.srcQueueFamilyIndex = src_family;
+	barrier.dstQueueFamilyIndex = dst_family;
 
 	vkCmdPipelineBarrier(cb, srcs, dsts, 0, 0, NULL, 0, NULL, 1, &barrier);
+}
+
+void vulkan_change_layout(VkCommandBuffer cb, VkImage img,
+		VkImageLayout ol, VkPipelineStageFlags srcs, VkAccessFlags srca,
+		VkImageLayout nl, VkPipelineStageFlags dsts, VkAccessFlags dsta) {
+	vulkan_change_layout_queue(cb, img, ol, srcs, srca, nl, dsts, dsta,
+		VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED);
 }
 
 bool vulkan_has_extension(unsigned count, const char **exts, const char *find) {
@@ -74,4 +99,27 @@ bool vulkan_has_extension(unsigned count, const char **exts, const char *find) {
 	}
 
 	return false;
+}
+
+enum wl_shm_format shm_from_drm_format(uint32_t drm_format) {
+	if (drm_format == DRM_FORMAT_ARGB8888) {
+		return WL_SHM_FORMAT_ARGB8888;
+	} else if (drm_format == DRM_FORMAT_XRGB8888) {
+		return WL_SHM_FORMAT_XRGB8888;
+	}
+
+	// otherwise they match
+	// note that if given an invalid drm_format (or one without wl_shm match),
+	// an invalid format will be returned.
+	return (enum wl_shm_format) drm_format;
+}
+
+uint32_t drm_from_shm_format(enum wl_shm_format wl_format) {
+	if (wl_format == WL_SHM_FORMAT_ARGB8888) {
+		return DRM_FORMAT_ARGB8888;
+	} else if (wl_format == WL_SHM_FORMAT_XRGB8888) {
+		return DRM_FORMAT_XRGB8888;
+	}
+
+	return (uint32_t) wl_format;
 }

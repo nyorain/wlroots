@@ -115,6 +115,7 @@ struct wlr_vk_descriptor_pool *wlr_vk_alloc_texture_ds(
 		return NULL;
 	}
 
+	--pool->free;
 	return pool;
 }
 
@@ -330,7 +331,7 @@ bool wlr_vk_submit_stage_wait(struct wlr_vk_renderer *renderer) {
 	return true;
 }
 
-struct wlr_vk_pixel_format_props *wlr_vk_format_from_wl(
+struct wlr_vk_format_props *wlr_vk_format_from_wl(
 		struct wlr_vk_renderer *renderer, enum wl_shm_format wl_fmt) {
 	for (size_t i = 0; i < renderer->format_count; ++i) {
 		if (renderer->formats[i].format.wl_format == wl_fmt) {
@@ -387,7 +388,42 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 	VkResult res;
 
 	vkCmdEndRenderPass(cb);
-	vkEndCommandBuffer(cb);
+
+	unsigned barrier_count = wl_list_length(&renderer->foreign_textures);
+	VkImageMemoryBarrier barriers[barrier_count];
+	memset(barriers, 0, sizeof(VkImageMemoryBarrier) * barrier_count);
+	struct wlr_vk_texture *texture;
+	unsigned idx = 0;
+	wl_list_for_each(texture, &renderer->foreign_textures, foreign_link) {
+		// not specified by vulkan spec if general layout is really
+		// needed here (but makes sense i guess?)
+		barriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barriers[idx].srcQueueFamilyIndex = renderer->graphics_queue.family;
+#ifdef WLR_VK_FOREIGN_QF
+		barriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
+#else
+		barriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+#endif
+		barriers[idx].image = texture->image;
+		barriers[idx].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		barriers[idx].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		barriers[idx].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		barriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT |
+			VK_ACCESS_MEMORY_WRITE_BIT;
+		barriers[idx].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		barriers[idx].subresourceRange.layerCount = 1;
+		barriers[idx].subresourceRange.levelCount = 1;
+		++idx;
+
+		texture->foreign_link.next = texture->foreign_link.prev = NULL;
+	}
+
+	wl_list_init(&renderer->foreign_textures); // clear list
+	if (barrier_count > 0) {
+		vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL,
+			barrier_count, barriers);
+	}
 
 	// render semaphores
 	unsigned rwait_count = 0u;
@@ -400,6 +436,7 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 	VkSubmitInfo submit_infos[2] = {0};
 
 	vulkan_render_surface_end(renderer->current, &rwait[0], &rsignal[0]);
+	vkEndCommandBuffer(cb);
 	if (rwait[0]) {
 		rwaitStages[rwait_count] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 		++rwait_count;
@@ -453,8 +490,16 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 		goto clean;
 	}
 
-	++renderer->stage.frame;
+	++renderer->frame;
 	release_stage_allocations(renderer);
+
+	// destroy pending textures
+	struct wlr_vk_texture *tex, *tmp_tex;
+	wl_list_for_each_safe(tex, tmp_tex, &renderer->destroy_textures, destroy_link) {
+		wlr_texture_destroy(&tex->wlr_texture);
+	}
+
+	wl_list_init(&renderer->destroy_textures); // reset the list
 	res = vkResetFences(renderer->dev->dev, 1, &renderer->fence);
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("vkResetFences", res);
@@ -472,6 +517,22 @@ static bool vulkan_render_texture_with_matrix(struct wlr_renderer *wlr_renderer,
 	VkCommandBuffer cb = renderer->current->cb;
 
 	struct wlr_vk_texture *texture = vulkan_get_texture(wlr_texture);
+	assert(texture->renderer == renderer);
+	if (texture->dmabuf_imported && !texture->owned) {
+		// transfer it to our graphics queue if not already done
+		vulkan_change_layout_queue(cb, texture->image,
+			VK_IMAGE_LAYOUT_GENERAL,
+			VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+			VK_ACCESS_MEMORY_WRITE_BIT,
+			VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+			VK_ACCESS_SHADER_READ_BIT,
+			VK_QUEUE_FAMILY_FOREIGN_EXT,
+			renderer->graphics_queue.family);
+		texture->owned = true;
+		assert(texture->foreign_link.next = NULL);
+		wl_list_insert(&renderer->foreign_textures, &texture->foreign_link);
+	}
 
 	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		renderer->tex_pipe);
@@ -486,6 +547,7 @@ static bool vulkan_render_texture_with_matrix(struct wlr_renderer *wlr_renderer,
 		VK_SHADER_STAGE_FRAGMENT_BIT, 16 * sizeof(float), sizeof(float),
 		&alpha);
 	vkCmdDraw(cb, 4, 1, 0, 0);
+	texture->last_used = renderer->frame;
 
 	return true;
 }
@@ -577,20 +639,55 @@ static void vulkan_render_ellipse_with_matrix(struct wlr_renderer *wlr_renderer,
 
 static void vulkan_wl_drm_buffer_get_size(struct wlr_renderer *wlr_renderer,
 		struct wl_resource *buffer, int *width, int *height) {
+	wlr_log(WLR_ERROR, "vulkan wl_drm support not implemented");
 	*width = 0;
 	*height = 0;
 }
 
 static int vulkan_get_dmabuf_formats(struct wlr_renderer *wlr_renderer,
 		int **formats) {
-	wlr_log(WLR_ERROR, "vulkan dmabuf not implemented");
-	return -1;
+	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
+	*formats = calloc(renderer->format_count, sizeof(int));
+	if (!*formats) {
+		wlr_log_errno(WLR_ERROR, "Allocation failed");
+		return -1;
+	}
+
+	int count = 0;
+	for (unsigned i = 0u; i < renderer->format_count; ++i) {
+		if (renderer->formats[i].modifier_count) { // dmabuf supported
+			(*formats)[count++] = drm_from_shm_format(
+				renderer->formats[i].format.wl_format);
+		}
+	}
+
+	return count;
 }
 
 static int vulkan_get_dmabuf_modifiers(struct wlr_renderer *wlr_renderer,
 		int format, uint64_t **modifiers) {
-	wlr_log(WLR_ERROR, "vulkan dmabuf not implemented");
-	return -1;
+	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
+	enum wl_shm_format fmt = shm_from_drm_format(format);
+	struct wlr_vk_format_props *props = wlr_vk_format_from_wl(renderer, fmt);
+	if (!props || !props->modifier_count) {
+		return -1;
+	}
+
+	*modifiers = calloc(props->modifier_count, sizeof(**modifiers));
+	if (!*modifiers) {
+		wlr_log_errno(WLR_ERROR, "Allocation failed");
+		return -1;
+	}
+
+	int count = 0;
+	for (unsigned i = 0u; i < props->modifier_count; ++i) {
+		struct wlr_vk_format_modifier_props *m = &props->modifiers[i];
+		if (m->dmabuf_flags & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) {
+			(*modifiers)[count++] = props->modifiers[i].props.drmFormatModifier;
+		}
+	}
+
+	return count;
 }
 
 static bool vulkan_format_supported(struct wlr_renderer *wlr_renderer,
@@ -616,8 +713,8 @@ static struct wlr_texture *vulkan_texture_from_wl_drm(
 static struct wlr_texture *vulkan_texture_from_dmabuf(
 		struct wlr_renderer *wlr_renderer,
 		struct wlr_dmabuf_attributes *attribs) {
-	wlr_log(WLR_ERROR, "vulkan dmabuf support not implemented");
-	return NULL;
+	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
+	return wlr_vk_texture_from_dmabuf(renderer, attribs);
 }
 
 static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
@@ -639,6 +736,13 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 		vkDestroyDescriptorPool(dev->dev, pool->pool, NULL);
 		free(pool);
 	}
+
+	struct wlr_vk_ycbcr_sampler *sampler;
+	wl_array_for_each(sampler, &renderer->ycbcr_samplers) {
+		vkDestroySampler(dev->dev, sampler->sampler, NULL);
+		vkDestroySamplerYcbcrConversion(dev->dev, sampler->conversion, NULL);
+	}
+	wl_array_release(&renderer->ycbcr_samplers);
 
 	if (renderer->stage.signal) {
 		vkDestroySemaphore(dev->dev, renderer->stage.signal, NULL);
@@ -685,6 +789,7 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 
 static void vulkan_init_wl_display(struct wlr_renderer *wlr_renderer,
 		struct wl_display *wl_display) {
+	wlr_log(WLR_ERROR, "vulkan wl_drm support not implemented");
 	// probably have to implement wl_drm ourselves since mesa
 	// still depends on it
 }
@@ -721,7 +826,9 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	VkDevice dev = renderer->dev->dev;
 	VkResult res;
 
-	// renderpass
+	// NOTE: we don't use present_src since we might use the renderpass
+	// on the drm backend (and might not even have the swapchain extension).
+	// Without a swapchain it's invalid to use this format.
 	VkAttachmentDescription attachment = {0};
 	attachment.format = format;
 	attachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -729,8 +836,8 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachment.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-	attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	attachment.initialLayout = VK_IMAGE_LAYOUT_GENERAL;
+	attachment.finalLayout = VK_IMAGE_LAYOUT_GENERAL;
 
 	VkAttachmentReference color_ref = {0};
 	color_ref.attachment = 0u;
@@ -780,7 +887,7 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 		return false;
 	}
 
-	// sampler
+	// default sampler (non ycbcr)
 	VkSamplerCreateInfo sampler_info = {0};
 	sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 	sampler_info.magFilter = VK_FILTER_LINEAR;
@@ -804,7 +911,7 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	// descriptor set
 	VkDescriptorSetLayoutBinding ds_bindings[1] = {{
 		0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-		VK_SHADER_STAGE_FRAGMENT_BIT, &renderer->sampler
+		VK_SHADER_STAGE_FRAGMENT_BIT, NULL
 	}};
 
 	VkDescriptorSetLayoutCreateInfo ds_info = {0};
@@ -1031,22 +1138,21 @@ struct wlr_renderer *wlr_vk_renderer_create_for_device(
 	renderer->graphics_queue = *graphics;
 	wlr_renderer_init(&renderer->wlr_renderer, &renderer_impl);
 	wl_list_init(&renderer->stage.buffers);
+	wl_list_init(&renderer->destroy_textures);
+	wl_list_init(&renderer->foreign_textures);
 	wl_list_init(&renderer->descriptor_pools);
+	wl_array_init(&renderer->ycbcr_samplers);
 
 	// - check device format support -
 	renderer->host_images = use_host_images;
-	VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL;
 	VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
-	VkFormatFeatureFlags req_features = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
-	if (renderer->host_images) {
-		tiling = VK_IMAGE_TILING_LINEAR;
-	} else {
+	bool host_images = renderer->host_images;
+	if (!host_images) {
 		usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-		req_features |= VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
 	}
 
 	size_t max_fmts;
-	const struct wlr_vk_pixel_format *fmts = vulkan_get_format_list(&max_fmts);
+	const struct wlr_vk_format *fmts = vulkan_get_format_list(&max_fmts);
 	renderer->wl_formats = calloc(max_fmts, sizeof(*renderer->wl_formats));
 	renderer->formats = calloc(max_fmts, sizeof(*renderer->formats));
 	if (!renderer->wl_formats || !renderer->formats) {
@@ -1054,24 +1160,11 @@ struct wlr_renderer *wlr_vk_renderer_create_for_device(
 		goto error;
 	}
 
-	VkFormatProperties props;
 	for (unsigned i = 0u; i < max_fmts; ++i) {
-		struct wlr_vk_pixel_format_props fprops;
+		struct wlr_vk_format_props fprops;
 		fprops.format = fmts[i];
 
-		// format properties
-		vkGetPhysicalDeviceFormatProperties(dev->phdev,
-			fmts[i].vk_format, &props);
-		VkFormatFeatureFlags features = props.optimalTilingFeatures;
-		if (renderer->host_images) {
-			features = props.linearTilingFeatures;
-		}
-
-		if ((features & req_features) != req_features) {
-			continue;
-		}
-
-		if (!wlr_vk_query_format(dev, &fprops, usage, tiling)) {
+		if (!wlr_vk_format_props_query(dev, &fprops, usage, host_images)) {
 			continue;
 		}
 
@@ -1139,7 +1232,7 @@ error:
 struct wlr_renderer *wlr_vk_renderer_create(struct wlr_backend *backend) {
 	VkResult res;
 	wlr_log(WLR_ERROR, "The vulkan renderer is only experimental and "
-		"not expected to be ready for daliy use");
+		"not expected to be ready for daily use");
 
 	if (!backend->impl->vulkan_queue_family_present_support) {
 		wlr_log(WLR_ERROR, "backend does not support vulkan");
