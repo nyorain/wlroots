@@ -27,7 +27,7 @@ wlr_render_inc = [wlr_inc]
 # vulkan
 if conf_data.get('WLR_HAS_VULKAN', false)
 	subdir('vulkan/shaders')
-	wlr_render_deps += [vulkan]
+	wlr_render_deps += [vulkan, wlr_protos] # protos for drm
 	wlr_render_src += files(
 		'vulkan/renderer.c',
 		'vulkan/vulkan.c',
@@ -35,6 +35,7 @@ if conf_data.get('WLR_HAS_VULKAN', false)
 		'vulkan/pixel_format.c',
 		'vulkan/render_surface.c',
 		'vulkan/util.c',
+		'vulkan/drm.c',
 	)
 
 	wlr_render_src += vulkan_shaders

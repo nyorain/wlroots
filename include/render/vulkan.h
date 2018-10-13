@@ -194,6 +194,7 @@ struct wlr_vk_renderer {
 	} stage;
 
 	bool host_images; // whether to allocate images on host memory
+	struct wl_global *wl_drm;
 };
 
 // Creates a vulkan renderer for the given device.
@@ -373,6 +374,15 @@ void vulkan_render_surface_end(struct wlr_vk_render_surface *rs,
 struct wlr_vk_render_surface *vulkan_get_render_surface(
 	struct wlr_render_surface *wlr_rs);
 
+// wl_drm implementation
+void vulkan_bind_wl_drm(struct wlr_renderer *wlr_renderer,
+	struct wl_display *wl_display);
+bool vulkan_resource_is_wl_drm_buffer(struct wlr_renderer *renderer,
+	struct wl_resource *resource);
+struct wlr_texture *vulkan_texture_from_wl_drm(
+	struct wlr_renderer *wlr_renderer, struct wl_resource *resource);
+void vulkan_wl_drm_buffer_get_size(struct wlr_renderer *wlr_renderer,
+	struct wl_resource *resource, int *width, int *height);
 
 // util
 bool vulkan_has_extension(unsigned count, const char **exts, const char *find);
