@@ -3,6 +3,8 @@ install_headers(
 	'egl.h',
 	'gles2.h',
 	'interface.h',
+	'vulkan.h',
+	'wlr_render_surface.h',
 	'wlr_renderer.h',
 	'wlr_texture.h',
 	subdir: 'wlr/render'
