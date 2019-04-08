@@ -178,6 +178,7 @@ static void bind_drm(struct wl_client *client, void *data, uint32_t version,
 	}
 
 	wl_resource_set_implementation(resource, &drm_impl, data, NULL);
+<<<<<<< HEAD
 	struct wlr_vk_device *dev = renderer->dev;
 	if(dev->pci.known) {
 		// TODO: first check whether that file really exists.
@@ -191,6 +192,9 @@ static void bind_drm(struct wl_client *client, void *data, uint32_t version,
 		// TODO: not sure what to do in this case really...
 		wl_drm_send_device(resource, "/dev/dri/renderD128");
 	}
+=======
+	wl_drm_send_device(resource, "/dev/dri/renderD128"); // TODO
+>>>>>>> 4e3d55bbe843889ef2b64913fc319ff9a44d5fd7
 	for (unsigned i = 0; i < renderer->format_count; ++i) {
 		struct wlr_vk_format_props *props = &renderer->formats[i];
 		struct wlr_vk_format_modifier_props *mod =
