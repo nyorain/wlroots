@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <unistd.h>
+#include <stdio.h>
 #include <vulkan/vulkan.h>
 #include <render/vulkan.h>
 #include <wlr/render/vulkan.h>
@@ -177,7 +178,19 @@ static void bind_drm(struct wl_client *client, void *data, uint32_t version,
 	}
 
 	wl_resource_set_implementation(resource, &drm_impl, data, NULL);
-	wl_drm_send_device(resource, "/dev/dri/renderD128"); // TODO
+	struct wlr_vk_device *dev = renderer->dev;
+	if(dev->pci.known) {
+		// TODO: first check whether that file really exists.
+		// otherwise use fallback (just guessing?)
+		char buf[512];
+		sprintf(buf, "/dev/dri/by-path/pci-%04x:%02x:%02x.%x-render",
+			dev->pci.bus, dev->pci.device, dev->pci.domain, dev->pci.function);
+		wl_drm_send_device(resource, buf);
+		wlr_log(WLR_INFO, "sending device path %s", buf);
+	} else {
+		// TODO: not sure what to do in this case really...
+		wl_drm_send_device(resource, "/dev/dri/renderD128");
+	}
 	for (unsigned i = 0; i < renderer->format_count; ++i) {
 		struct wlr_vk_format_props *props = &renderer->formats[i];
 		struct wlr_vk_format_modifier_props *mod =

@@ -40,13 +40,13 @@ static VkImageAspectFlagBits mem_plane_ascpect(unsigned i) {
 	}
 }
 
-static VkSampler get_ycbcr_sampler(struct wlr_vk_renderer *renderer,
+static struct wlr_vk_ycbcr_sampler *get_ycbcr_sampler(struct wlr_vk_renderer *renderer,
 		VkFormat format, VkFormatFeatureFlags format_features, bool alpha) {
 	assert(renderer->dev->features.ycbcr);
 	struct wlr_vk_ycbcr_sampler *sampler;
 	wl_array_for_each(sampler, &renderer->ycbcr_samplers) {
 		if (sampler->format == format) {
-			return sampler->sampler;
+			return sampler;
 		}
 	}
 
@@ -81,7 +81,7 @@ static VkSampler get_ycbcr_sampler(struct wlr_vk_renderer *renderer,
 		conversioni.xChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
 		conversioni.yChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
 	} else {
-		wlr_log(WLR_ERROR, "Format does support not chroma sampling mode");
+		wlr_log(WLR_ERROR, "Format does support no chroma sampling mode");
 		goto error;
 	}
 
@@ -135,14 +135,14 @@ static VkSampler get_ycbcr_sampler(struct wlr_vk_renderer *renderer,
 	sampler->format = format;
 	sampler->conversion = conversion;
 	sampler->sampler = vk_sampler;
-	return sampler->sampler;
+	return sampler;
 
 destroy_sampler:
 	vkDestroySampler(dev, vk_sampler, NULL);
 destroy_conversion:
 	vkDestroySamplerYcbcrConversion(dev, conversion, NULL);
 error:
-	return VK_NULL_HANDLE;
+	return NULL;
 }
 
 static void vulkan_texture_get_size(struct wlr_texture *wlr_texture, int *width,
@@ -492,6 +492,24 @@ struct wlr_texture *wlr_vk_texture_from_pixels(struct wlr_vk_renderer *renderer,
 		VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
 	};
 	view_info.image = texture->image;
+
+	// get/create ycbcr sampler if needed
+	// conversion info must be added to imageView *and* sampler
+	struct wlr_vk_ycbcr_sampler *ycbcr_sampler = NULL;
+	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
+	if (fmt->format.ycbcr) {
+		ycbcr_sampler = get_ycbcr_sampler(renderer,
+			fmt->format.vk_format, fmt->features, fmt->format.has_alpha);
+		if (!ycbcr_sampler) {
+			wlr_vk_error("Could not create ycbcr sampler", res);
+			goto error;
+		}
+
+		conversion_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
+		conversion_info.conversion = ycbcr_sampler->conversion;
+		view_info.pNext = &conversion_info;
+	}
+
 	res = vkCreateImageView(dev, &view_info, NULL,
 		&texture->image_view);
 	if (res != VK_SUCCESS) {
@@ -510,8 +528,7 @@ struct wlr_texture *wlr_vk_texture_from_pixels(struct wlr_vk_renderer *renderer,
 	ds_img_info.imageView = texture->image_view;
 	ds_img_info.imageLayout = layout;
 	if (fmt->format.ycbcr) {
-		ds_img_info.sampler = get_ycbcr_sampler(renderer,
-			fmt->format.vk_format, fmt->features, fmt->format.has_alpha);
+		ds_img_info.sampler = ycbcr_sampler->sampler;
 		if (!ds_img_info.sampler) {
 			goto error;
 		}
@@ -668,7 +685,11 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 			plane_layouts[i].size = 0;
 		}
 
-		mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_EXCPLICIT_DRM_FORMAT_MODIFIER_CREATE_INFO_EXT;
+		uint32_t f = drm_from_shm_format(attribs->format);
+		wlr_log(WLR_INFO, "importing dmabuf image with format %.4s and modifier %lu (%lu)",
+			(const char*) &f, mod->props.drmFormatModifier, attribs->modifier);
+
+		mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
 		mod_info.drmFormatModifierPlaneCount = plane_count;
 		mod_info.drmFormatModifier = mod->props.drmFormatModifier;
 		mod_info.pPlaneLayouts = plane_layouts;
@@ -810,18 +831,37 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 	view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
 	view_info.format = texture->format->vk_format;
-	view_info.components.r = VK_COMPONENT_SWIZZLE_R;
-	view_info.components.g = VK_COMPONENT_SWIZZLE_G;
-	view_info.components.b = VK_COMPONENT_SWIZZLE_B;
-	view_info.components.a = VK_COMPONENT_SWIZZLE_A;
-	if (!texture->format->has_alpha) {
-		view_info.components.a = VK_COMPONENT_SWIZZLE_ONE;
-	}
+	view_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+	// TODO: not allowed by spec
+	// if (!texture->format->has_alpha) {
+	// 	view_info.components.a = VK_COMPONENT_SWIZZLE_ONE;
+	// }
 
 	view_info.subresourceRange = (VkImageSubresourceRange) {
 		VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
 	};
 	view_info.image = texture->image;
+
+	// get/create ycbcr sampler if needed
+	// conversion info must be added to imageView *and* sampler
+	struct wlr_vk_ycbcr_sampler *ycbcr_sampler = NULL;
+	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
+	if (fmt->format.ycbcr) {
+		ycbcr_sampler = get_ycbcr_sampler(renderer,
+			fmt->format.vk_format, fmt->features, fmt->format.has_alpha);
+		if (!ycbcr_sampler) {
+			wlr_vk_error("Could not create ycbcr sampler", res);
+			goto error;
+		}
+
+		conversion_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
+		conversion_info.conversion = ycbcr_sampler->conversion;
+		view_info.pNext = &conversion_info;
+	}
+
 	res = vkCreateImageView(dev, &view_info, NULL,
 		&texture->image_view);
 	if (res != VK_SUCCESS) {
@@ -840,15 +880,14 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 	ds_img_info.imageView = texture->image_view;
 	ds_img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	if (fmt->format.ycbcr) {
-		ds_img_info.sampler = get_ycbcr_sampler(renderer,
-			fmt->format.vk_format, fmt->features, fmt->format.has_alpha);
-		if (!ds_img_info.sampler) {
-			goto error;
-		}
+		ds_img_info.sampler = ycbcr_sampler->sampler;
 	} else {
 		ds_img_info.sampler = renderer->sampler;
 	}
 
+	// TODO: nope we are apparently not allowed to set the sampler here,
+	// it must have been set immutably in the descripto set layout for
+	// ycbcr images...
 	VkWriteDescriptorSet ds_write = {0};
 	ds_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	ds_write.descriptorCount = 1;

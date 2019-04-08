@@ -876,7 +876,7 @@ static bool offscreen_render_surface_init_buffers(
 					plane_layouts[i].size = 0;
 				}
 
-				mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_EXCPLICIT_DRM_FORMAT_MODIFIER_CREATE_INFO_EXT;
+				mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT;
 				mod_info.drmFormatModifierPlaneCount = plane_count;
 				mod_info.drmFormatModifier = rs->modifier;
 				mod_info.pPlaneLayouts = plane_layouts;

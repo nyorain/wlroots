@@ -53,9 +53,11 @@ static const struct wlr_vk_format formats[] = {
 			.vsub = 1,
 		}},
 	},
+	// TODO: not sure about mapping/byte order from here
+	// switch first two?
 	{
 		.wl_format = WL_SHM_FORMAT_YUYV,
-		.vk_format = VK_FORMAT_G8B8G8R8_422_UNORM,
+		.vk_format = VK_FORMAT_B8G8R8G8_422_UNORM,
 		.has_alpha = false,
 		.ycbcr = true,
 		.plane_count = 1,
@@ -67,7 +69,7 @@ static const struct wlr_vk_format formats[] = {
 	},
 	{
 		.wl_format = WL_SHM_FORMAT_UYVY,
-		.vk_format = VK_FORMAT_B8G8R8G8_422_UNORM,
+		.vk_format = VK_FORMAT_G8B8G8R8_422_UNORM,
 		.has_alpha = false,
 		.ycbcr = true,
 		.plane_count = 1,
@@ -249,6 +251,9 @@ bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
 	efmtp.sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES;
 
 	props->modifier_count = 0;
+	uint32_t f = drm_from_shm_format(format->wl_format);
+	wlr_log(WLR_INFO, "%d modifiers on format %4s", (int) modp.drmFormatModifierCount,
+		(const char*) &f);
 	if (modp.drmFormatModifierCount > 0) {
 		// the first call to vkGetPhysicalDeviceFormatProperties2 did only
 		// retrieve the number of modifiers, we now have to retrieve
@@ -276,14 +281,14 @@ bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
 		// format properties
 		ifmtp.pNext = &efmtp;
 
-		props->modifiers = calloc(props->modifier_count,
+		props->modifiers = calloc(modp.drmFormatModifierCount,
 			sizeof(*props->modifiers));
 		if (!props->modifiers) {
 			wlr_log_errno(WLR_ERROR, "Allocation failed");
 			return false;
 		}
 
-		for (unsigned i = 0u; i < props->modifier_count; ++i) {
+		for (unsigned i = 0u; i < modp.drmFormatModifierCount; ++i) {
 			VkDrmFormatModifierPropertiesEXT m =
 				modp.pDrmFormatModifierProperties[i];
 			VkFormatFeatureFlags features = m.drmFormatModifierTilingFeatures;
@@ -313,10 +318,13 @@ bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
 				(emp.exportFromImportedHandleTypes &
 				 VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT);
 			++props->modifier_count;
+
+			wlr_log(WLR_INFO, "modifier %lu on format %4s",
+				m.drmFormatModifier, (const char*) &f);
 		}
 
 		free(modp.pDrmFormatModifierProperties);
-	} else if (!drm_fmt_ext && dma_ext) {
+	} else /* if (!drm_fmt_ext && dma_ext) */ {
 		// in this case we can still fall back to importing images
 		// without the extension; relying on DRM_FORMAT_MOD_INVALID.
 		// technically not guaranteed to work where modifiers are used.

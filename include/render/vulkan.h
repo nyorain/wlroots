@@ -58,6 +58,13 @@ struct wlr_vk_device {
 
 	VkPhysicalDevice phdev;
 	VkDevice dev;
+	struct {
+		uint16_t domain;
+		uint8_t bus;
+		uint8_t device;
+		uint8_t function;
+		bool known;
+	} pci;
 
 	unsigned extension_count;
 	const char **extensions;

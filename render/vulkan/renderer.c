@@ -1232,15 +1232,19 @@ struct wlr_renderer *wlr_vk_renderer_create(struct wlr_backend *backend) {
 	//  - (as default, without user preference) integrated vs dedicated
 	//  - when on drm backend match it with the gbm device (via the new
 	//    VK_EXT_pci_bus_info extension and using drmGetDevice)
-	uint32_t num_devs = 1;
-	VkPhysicalDevice phdev;
+	uint32_t num_devs = 2;
+	VkPhysicalDevice phdevs[2];
 	res = vkEnumeratePhysicalDevices(ini->instance, &num_devs,
-		&phdev);
-	if ((res != VK_SUCCESS && res != VK_INCOMPLETE) || !phdev) {
+		phdevs);
+	if ((res != VK_SUCCESS && res != VK_INCOMPLETE) || num_devs < 2) {
 		wlr_log(WLR_ERROR, "Could not retrieve physical device");
 		free(ini);
 		return NULL;
 	}
+
+	// TODO: temp to force intel gpu on my device.
+	// must be removed
+	VkPhysicalDevice phdev = phdevs[1];
 
 	// queue families
 	uint32_t qfam_count;

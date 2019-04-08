@@ -322,7 +322,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	wl_list_init(&dev->link);
 	dev->phdev = phdev;
 	dev->instance = ini;
-	dev->extensions = calloc(7 + ext_count, sizeof(*ini->extensions));
+	dev->extensions = calloc(8 + ext_count, sizeof(*ini->extensions));
 	if (!dev->extensions) {
 		wlr_log_errno(WLR_ERROR, "allocation failed");
 		goto error;
@@ -373,14 +373,31 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		}
 
 		// doesn't strictly depend on any of the two but we have no
-		// use for this without the dma_buf extension
-		name = VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME;
-		if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
-			dev->extensions[dev->extension_count++] = name;
+		// use for this without the dma_buf extension.
+		// We only need khr_image_format list since its required for
+		// ext_drm_format_modifier
+		const char* names2[] = {
+			VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
+			VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME,
+		};
+		nc = sizeof(names2) / sizeof(names2[0]);
+		if (find_extensions(avail_ext_props, avail_extc, names2, nc) == NULL) {
+			dev->extensions[dev->extension_count++] = names2[0];
+			dev->extensions[dev->extension_count++] = names2[1];
 		}
 	} else {
 		wlr_log(WLR_ERROR, "dmabuf extensions no found, Vulkan renderer will "
 			"have no support for importing external dma/wl_drm buffers");
+	}
+
+	bool pci = false;
+	name = VK_EXT_PCI_BUS_INFO_EXTENSION_NAME;
+	if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
+		// we don't have to enable the extension, we can just instantly
+		// query the pci properties of the physical device
+		pci = true;
+	} else {
+		wlr_log(WLR_ERROR, "pci_buf_info_ext not available. Can't know dri path");
 	}
 
 	name = VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME;
@@ -397,6 +414,59 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	vkGetPhysicalDeviceFeatures2(phdev, &features);
 	dev->features.ycbcr = ycbcr_features.samplerYcbcrConversion;
 	wlr_log(WLR_INFO, "YCbCr device feature: %d", dev->features.ycbcr);
+
+	// device properties
+	VkPhysicalDevicePCIBusInfoPropertiesEXT bus_info = {0};
+	bus_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT;
+
+	VkPhysicalDeviceProperties2 props = {0};
+	props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+	if(pci) {
+		props.pNext = &bus_info;
+	}
+
+	vkGetPhysicalDeviceProperties2(phdev, &props);
+
+	uint32_t vv_major = (props.properties.apiVersion >> 22);
+	uint32_t vv_minor = (props.properties.apiVersion >> 12) & 0x3ff;
+	uint32_t vv_patch = (props.properties.apiVersion) & 0xfff;
+
+	uint32_t dv_major = (props.properties.driverVersion >> 22);
+	uint32_t dv_minor = (props.properties.driverVersion >> 12) & 0x3ff;
+	uint32_t dv_patch = (props.properties.driverVersion) & 0xfff;
+
+	const char* dev_type = "unknown";
+	switch(props.properties.deviceType) {
+		case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+			dev_type = "integrated";
+			break;
+		case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+			dev_type = "discrete";
+			break;
+		case VK_PHYSICAL_DEVICE_TYPE_CPU:
+			dev_type = "cpu";
+			break;
+		case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+			dev_type = "gpu";
+			break;
+		default:
+			break;
+	}
+
+	wlr_log(WLR_INFO,  "Vulkan device: '%s'", props.properties.deviceName);
+	wlr_log(WLR_INFO,  "Device type: '%s'", dev_type);
+	wlr_log(WLR_INFO,  "Supported API version: %u.%u.%u", vv_major, vv_minor, vv_patch);
+	wlr_log(WLR_INFO,  "Driver version: %u.%u.%u", dv_major, dv_minor, dv_patch);
+
+	if(pci) {
+		wlr_log(WLR_INFO, "PCI bus: %04x:%02x:%02x.%x", bus_info.pciDomain,
+			bus_info.pciBus, bus_info.pciDevice, bus_info.pciFunction);
+		dev->pci.known = true;
+		dev->pci.domain = bus_info.pciDomain;
+		dev->pci.bus = bus_info.pciBus;
+		dev->pci.device = bus_info.pciDevice;
+		dev->pci.function = bus_info.pciFunction;
+	}
 
 	{
 		float prio = 1.f;
