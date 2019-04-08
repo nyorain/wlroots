@@ -40,19 +40,26 @@ static VkImageAspectFlagBits mem_plane_ascpect(unsigned i) {
 	}
 }
 
-static struct wlr_vk_ycbcr_sampler *get_ycbcr_sampler(struct wlr_vk_renderer *renderer,
+// TODO: add and use pipes, ds layout
+static struct wlr_vk_ycbcr_setup *get_ycbcr_setup(struct wlr_vk_renderer *renderer,
 		VkFormat format, VkFormatFeatureFlags format_features, bool alpha) {
 	assert(renderer->dev->features.ycbcr);
-	struct wlr_vk_ycbcr_sampler *sampler;
-	wl_array_for_each(sampler, &renderer->ycbcr_samplers) {
-		if (sampler->format == format) {
-			return sampler;
-		}
+	struct wlr_vk_ycbcr_setup *setup = wlr_vk_find_ycbcr_setup(renderer, format);
+	if (setup) {
+		return setup;
 	}
 
-	// create new sampler
+	// create new setup
 	VkResult res;
 	VkDevice dev = renderer->dev->dev;
+
+	setup = calloc(1, sizeof(*setup));
+	if (!setup) {
+		wlr_log_errno(WLR_ERROR, "Allocation failed");
+		goto destroy_sampler;
+	}
+
+	setup->format = format;
 
 	// conversion
 	VkSamplerYcbcrConversionCreateInfo conversioni = {0};
@@ -93,8 +100,8 @@ static struct wlr_vk_ycbcr_sampler *get_ycbcr_sampler(struct wlr_vk_renderer *re
 		conversioni.chromaFilter = VK_FILTER_NEAREST;
 	}
 
-	VkSamplerYcbcrConversion conversion;
-	res = vkCreateSamplerYcbcrConversion(dev, &conversioni, NULL, &conversion);
+	res = vkCreateSamplerYcbcrConversion(dev, &conversioni, NULL,
+		&setup->conversion);
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("vkCreateSamplerYcbcrConversion", res);
 		goto error;
@@ -116,31 +123,22 @@ static struct wlr_vk_ycbcr_sampler *get_ycbcr_sampler(struct wlr_vk_renderer *re
 
 	VkSamplerYcbcrConversionInfo sampler_conversioni = {0};
 	sampler_conversioni.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-	sampler_conversioni.conversion = conversion;
+	sampler_conversioni.conversion = setup->conversion;
 	sampleri.pNext = &sampler_conversioni;
 
-	VkSampler vk_sampler;
-	res = vkCreateSampler(dev, &sampleri, NULL, &vk_sampler);
+	res = vkCreateSampler(dev, &sampleri, NULL, &setup->sampler);
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("Failed to create sampler", res);
 		goto destroy_conversion;
 	}
 
-	sampler = wl_array_add(&renderer->ycbcr_samplers, sizeof(*sampler));
-	if (!sampler) {
-		wlr_log_errno(WLR_ERROR, "Allocation failed");
-		goto destroy_sampler;
-	}
-
-	sampler->format = format;
-	sampler->conversion = conversion;
-	sampler->sampler = vk_sampler;
-	return sampler;
+	wl_list_insert(&renderer->ycbcr_setups, &setup->link);
+	return setup;
 
 destroy_sampler:
-	vkDestroySampler(dev, vk_sampler, NULL);
+	vkDestroySampler(dev, setup->sampler, NULL);
 destroy_conversion:
-	vkDestroySamplerYcbcrConversion(dev, conversion, NULL);
+	vkDestroySamplerYcbcrConversion(dev, setup->conversion, NULL);
 error:
 	return NULL;
 }
@@ -480,13 +478,14 @@ struct wlr_texture *wlr_vk_texture_from_pixels(struct wlr_vk_renderer *renderer,
 	view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
 	view_info.format = texture->format->vk_format;
-	view_info.components.r = VK_COMPONENT_SWIZZLE_R;
-	view_info.components.g = VK_COMPONENT_SWIZZLE_G;
-	view_info.components.b = VK_COMPONENT_SWIZZLE_B;
-	view_info.components.a = VK_COMPONENT_SWIZZLE_A;
-	if (!texture->format->has_alpha) {
-		view_info.components.a = VK_COMPONENT_SWIZZLE_ONE;
-	}
+	view_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+	view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+	// TODO: not allowed by spec
+	// if (!texture->format->has_alpha) {
+	// 	view_info.components.a = VK_COMPONENT_SWIZZLE_ONE;
+	// }
 
 	view_info.subresourceRange = (VkImageSubresourceRange) {
 		VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
@@ -495,18 +494,18 @@ struct wlr_texture *wlr_vk_texture_from_pixels(struct wlr_vk_renderer *renderer,
 
 	// get/create ycbcr sampler if needed
 	// conversion info must be added to imageView *and* sampler
-	struct wlr_vk_ycbcr_sampler *ycbcr_sampler = NULL;
+	struct wlr_vk_ycbcr_setup *ycbcr_setup = NULL;
 	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
 	if (fmt->format.ycbcr) {
-		ycbcr_sampler = get_ycbcr_sampler(renderer,
+		ycbcr_setup = get_ycbcr_setup(renderer,
 			fmt->format.vk_format, fmt->features, fmt->format.has_alpha);
-		if (!ycbcr_sampler) {
+		if (!ycbcr_setup) {
 			wlr_vk_error("Could not create ycbcr sampler", res);
 			goto error;
 		}
 
 		conversion_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-		conversion_info.conversion = ycbcr_sampler->conversion;
+		conversion_info.conversion = ycbcr_setup->conversion;
 		view_info.pNext = &conversion_info;
 	}
 
@@ -528,7 +527,7 @@ struct wlr_texture *wlr_vk_texture_from_pixels(struct wlr_vk_renderer *renderer,
 	ds_img_info.imageView = texture->image_view;
 	ds_img_info.imageLayout = layout;
 	if (fmt->format.ycbcr) {
-		ds_img_info.sampler = ycbcr_sampler->sampler;
+		ds_img_info.sampler = ycbcr_setup->sampler;
 		if (!ds_img_info.sampler) {
 			goto error;
 		}
@@ -847,18 +846,18 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 
 	// get/create ycbcr sampler if needed
 	// conversion info must be added to imageView *and* sampler
-	struct wlr_vk_ycbcr_sampler *ycbcr_sampler = NULL;
+	struct wlr_vk_ycbcr_setup *ycbcr_setup = NULL;
 	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
 	if (fmt->format.ycbcr) {
-		ycbcr_sampler = get_ycbcr_sampler(renderer,
+		ycbcr_setup = get_ycbcr_setup(renderer,
 			fmt->format.vk_format, fmt->features, fmt->format.has_alpha);
-		if (!ycbcr_sampler) {
-			wlr_vk_error("Could not create ycbcr sampler", res);
+		if (!ycbcr_setup) {
+			wlr_vk_error("Could not create ycbcr setup", res);
 			goto error;
 		}
 
 		conversion_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-		conversion_info.conversion = ycbcr_sampler->conversion;
+		conversion_info.conversion = ycbcr_setup->conversion;
 		view_info.pNext = &conversion_info;
 	}
 
@@ -880,7 +879,7 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 	ds_img_info.imageView = texture->image_view;
 	ds_img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	if (fmt->format.ycbcr) {
-		ds_img_info.sampler = ycbcr_sampler->sampler;
+		ds_img_info.sampler = ycbcr_setup->sampler;
 	} else {
 		ds_img_info.sampler = renderer->sampler;
 	}

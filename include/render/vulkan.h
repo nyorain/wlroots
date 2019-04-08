@@ -146,10 +146,20 @@ struct wlr_vk_format_modifier_props *wlr_vk_format_props_find_modifier(
 	struct wlr_vk_format_props *props, uint64_t mod);
 void wlr_vk_format_props_finish(struct wlr_vk_format_props *props);
 
-struct wlr_vk_ycbcr_sampler {
+// Everything needed to support a specific ycbcr format (quite costly to do)
+struct wlr_vk_ycbcr_setup {
+	struct wl_list link;
 	VkFormat format;
 	VkSampler sampler;
 	VkSamplerYcbcrConversion conversion;
+
+	// ycbcr samplers have to be specified in the ds layout so each ycbcr
+	// format/sampler setup we support needs its own ds layout.
+	// Therefore each format we support also needs it own pipe layout
+	// and therefore own texture pipe.
+	VkDescriptorSetLayout ds_layout;
+	VkPipelineLayout pipeline_layout;
+	VkPipeline tex_pipe;
 };
 
 // Vulkan wlr_renderer implementation on top of a wlr_vk_device.
@@ -158,16 +168,22 @@ struct wlr_vk_renderer {
 	struct wlr_backend *backend;
 	struct wlr_vk_device *dev;
 
-	VkCommandPool command_pool;
+	// the format used in render_pass
+	// the renderer will only be able to render surfaces of that format
+	VkFormat render_format;
 	VkRenderPass render_pass;
-	VkSampler sampler;
-	VkDescriptorSetLayout descriptor_set_layout;
-	VkPipelineLayout pipeline_layout;
-	VkPipeline tex_pipe;
+
+	VkCommandPool command_pool;
 	VkPipeline quad_pipe;
 	VkPipeline ellipse_pipe;
 	VkFence fence;
-	VkFormat format; // used in renderpass
+
+	// texture rendering objects for non-ycbcr textures.
+	// For ycbcr see ycbcr_setups and struct wlr_vk_ycbcr_setup
+	VkDescriptorSetLayout ds_layout;
+	VkPipeline tex_pipe;
+	VkPipelineLayout pipeline_layout;
+	VkSampler sampler;
 
 	// current frame id. Used in wlr_vk_texture.last_used
 	// Increased every time a frame is ended for the renderer
@@ -182,16 +198,18 @@ struct wlr_vk_renderer {
 	// supported formats for textures (contains only those formats
 	// that support everything we need for textures)
 	uint32_t format_count;
-	enum wl_shm_format *wl_formats;
+	enum wl_shm_format *wl_formats; // to implement vulkan_formats
 	struct wlr_vk_format_props *formats;
 
 	size_t last_pool_size;
 	struct wl_list descriptor_pools; // type wlr_vk_descriptor_pool
-	struct wl_array ycbcr_samplers; // type wlr_vk_ycbcr_sampler
+	struct wl_list ycbcr_setups; // type wlr_vk_ycbcr_setup
 
+	// both of type wlr_vk_texture
 	struct wl_list destroy_textures; // textures to destroy after frame
-	struct wl_list foreign_textures; // texture to return to foreign queue
+	struct wl_list foreign_textures; // textures to return to foreign queue
 
+	// staging buffers used to upload data to the gpu
 	struct {
 		VkCommandBuffer cb;
 		VkSemaphore signal;
@@ -233,6 +251,8 @@ struct wlr_vk_descriptor_pool *wlr_vk_alloc_texture_ds(
 // Frees the given descriptor set from the pool its pool.
 void wlr_vk_free_ds(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_descriptor_pool *pool, VkDescriptorSet ds);
+struct wlr_vk_ycbcr_setup *wlr_vk_find_ycbcr_setup(
+	struct wlr_vk_renderer *renderer, VkFormat format);
 struct wlr_vk_format_props *wlr_vk_format_from_wl(
 	struct wlr_vk_renderer *renderer, enum wl_shm_format format);
 struct wlr_vk_renderer *vulkan_get_renderer(struct wlr_renderer *r);
@@ -250,11 +270,11 @@ struct wlr_vk_texture {
 	uint32_t height;
 	VkDescriptorSet ds;
 	struct wlr_vk_descriptor_pool *ds_pool;
-	uint32_t last_used;
+	uint32_t last_used; // to track when it can be destroyed
 	bool dmabuf_imported;
 	bool owned; // if dmabuf_imported: whether we have ownership of the image
-	struct wl_list foreign_link;
-	struct wl_list destroy_link;
+	struct wl_list foreign_link; // for renderer.foreign
+	struct wl_list destroy_link; // for renderer.destroy
 };
 
 struct wlr_vk_texture *vulkan_get_texture(struct wlr_texture *wlr_texture);

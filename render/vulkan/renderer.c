@@ -61,7 +61,7 @@ struct wlr_vk_descriptor_pool *wlr_vk_alloc_texture_ds(
 	VkDescriptorSetAllocateInfo ds_info = {0};
 	ds_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	ds_info.descriptorSetCount = 1;
-	ds_info.pSetLayouts = &renderer->descriptor_set_layout;
+	ds_info.pSetLayouts = &renderer->ds_layout;
 
 	bool found = false;
 	struct wlr_vk_descriptor_pool *pool;
@@ -122,6 +122,17 @@ void wlr_vk_free_ds(struct wlr_vk_renderer *renderer,
 		struct wlr_vk_descriptor_pool *pool, VkDescriptorSet ds) {
 	vkFreeDescriptorSets(renderer->dev->dev, pool->pool, 1, &ds);
 	++pool->free;
+}
+
+struct wlr_vk_ycbcr_setup *wlr_vk_find_ycbcr_setup(
+		struct wlr_vk_renderer *renderer, VkFormat format) {
+	struct wlr_vk_ycbcr_setup *setup;
+	wl_list_for_each(setup, &renderer->ycbcr_setups, link) {
+		if (setup->format == format) {
+			return setup;
+		}
+	}
+	return NULL;
 }
 
 static void shared_buffer_destroy(struct wlr_vk_renderer *r,
@@ -718,12 +729,12 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 		free(pool);
 	}
 
-	struct wlr_vk_ycbcr_sampler *sampler;
-	wl_array_for_each(sampler, &renderer->ycbcr_samplers) {
+	struct wlr_vk_ycbcr_setup *sampler, *tmp_sampler;
+	wl_list_for_each_safe(sampler, tmp_sampler, &renderer->ycbcr_setups, link) {
 		vkDestroySampler(dev->dev, sampler->sampler, NULL);
 		vkDestroySamplerYcbcrConversion(dev->dev, sampler->conversion, NULL);
+		free(sampler);
 	}
-	wl_array_release(&renderer->ycbcr_samplers);
 
 	if (renderer->stage.signal) {
 		vkDestroySemaphore(dev->dev, renderer->stage.signal, NULL);
@@ -743,9 +754,9 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 	if (renderer->pipeline_layout) {
 		vkDestroyPipelineLayout(dev->dev, renderer->pipeline_layout, NULL);
 	}
-	if (renderer->descriptor_set_layout) {
+	if (renderer->ds_layout) {
 		vkDestroyDescriptorSetLayout(dev->dev,
-			renderer->descriptor_set_layout, NULL);
+			renderer->ds_layout, NULL);
 	}
 	if (renderer->sampler) {
 		vkDestroySampler(dev->dev, renderer->sampler, NULL);
@@ -895,7 +906,7 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	ds_info.pBindings = ds_bindings;
 
 	res = vkCreateDescriptorSetLayout(dev, &ds_info, NULL,
-		&renderer->descriptor_set_layout);
+		&renderer->ds_layout);
 	if (res != VK_SUCCESS) {
 		wlr_log(WLR_ERROR, "Failed to create descriptor set layout: %d", res);
 		return false;
@@ -913,7 +924,7 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	VkPipelineLayoutCreateInfo pl_info = {0};
 	pl_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	pl_info.setLayoutCount = 1;
-	pl_info.pSetLayouts = &renderer->descriptor_set_layout;
+	pl_info.pSetLayouts = &renderer->ds_layout;
 	pl_info.pushConstantRangeCount = 2;
 	pl_info.pPushConstantRanges = pc_ranges;
 
