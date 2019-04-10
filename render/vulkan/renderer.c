@@ -1127,7 +1127,7 @@ struct wlr_renderer *wlr_vk_renderer_create_for_device(
 	wl_list_init(&renderer->destroy_textures);
 	wl_list_init(&renderer->foreign_textures);
 	wl_list_init(&renderer->descriptor_pools);
-	wl_array_init(&renderer->ycbcr_samplers);
+	wl_list_init(&renderer->ycbcr_setups);
 
 	// - check device format support -
 	renderer->host_images = use_host_images;

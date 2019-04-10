@@ -684,9 +684,9 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 			plane_layouts[i].size = 0;
 		}
 
-		uint32_t f = drm_from_shm_format(attribs->format);
-		wlr_log(WLR_INFO, "importing dmabuf image with format %.4s and modifier %lu (%lu)",
-			(const char*) &f, mod->props.drmFormatModifier, attribs->modifier);
+		// uint32_t f = drm_from_shm_format(attribs->format);
+		// wlr_log(WLR_INFO, "importing dmabuf image with format %.4s and modifier %lu (%lu)",
+		// 	(const char*) &f, mod->props.drmFormatModifier, attribs->modifier);
 
 		mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
 		mod_info.drmFormatModifierPlaneCount = plane_count;

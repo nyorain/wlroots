@@ -101,11 +101,11 @@ static bool query_plane_formats(struct wlr_drm_backend *drm,
 			for (unsigned j = 0; j < format_blob->count_modifiers; j++) {
 				struct drm_format_modifier *mod = &modifiers[j];
 				if ((i < mod->offset) || (i > mod->offset + 63) ||
-						!(mod->formats & (1 << (i - mod->offset)))) {
+						!(mod->formats & (1ull << (i - mod->offset)))) {
 					continue;
 				}
 
-				uint64_t index = ++p->formats[i].modifier_count;
+				uint64_t index = p->formats[i].modifier_count++;
 				fmt_mods[index] = mod->modifier;
 			}
 
@@ -663,10 +663,14 @@ static bool drm_connector_set_cursor(struct wlr_output *output,
 		// output first. If that fails we can still fall back to this
 		// approach. Or implement direct texture reading and therefore
 		// remove the need for this temporary render surface
-		if (!init_drm_render_surface(&plane->surf, renderer, w, h,
-				GBM_FORMAT_ARGB8888, GBM_BO_USE_LINEAR, 0, NULL)) {
-			wlr_log(WLR_ERROR, "Cannot allocate cursor resources");
-			return false;
+		if (!plane->surf) {
+			plane->surf = wlr_render_surface_create_headless(renderer->wlr_rend, w, h);
+			if (!plane->surf) {
+				wlr_log(WLR_ERROR, "Cannot allocate cursor resources");
+				return false;
+			}
+		} else if (w != plane->surf->width || h != plane->surf->height) {
+			wlr_render_surface_resize(plane->surf, w, h);
 		}
 
 		plane->cursor_bo = gbm_bo_create(drm->renderer.gbm, w, h,

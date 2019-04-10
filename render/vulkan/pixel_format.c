@@ -252,7 +252,7 @@ bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
 
 	props->modifier_count = 0;
 	uint32_t f = drm_from_shm_format(format->wl_format);
-	wlr_log(WLR_INFO, "%d modifiers on format %4s", (int) modp.drmFormatModifierCount,
+	wlr_log(WLR_INFO, "%d modifiers on format %.4s", (int) modp.drmFormatModifierCount,
 		(const char*) &f);
 	if (modp.drmFormatModifierCount > 0) {
 		// the first call to vkGetPhysicalDeviceFormatProperties2 did only
@@ -319,7 +319,7 @@ bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
 				 VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT);
 			++props->modifier_count;
 
-			wlr_log(WLR_INFO, "modifier %lu on format %4s",
+			wlr_log(WLR_INFO, "modifier %lu on format %.4s",
 				m.drmFormatModifier, (const char*) &f);
 		}
 

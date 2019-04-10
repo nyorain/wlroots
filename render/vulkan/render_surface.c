@@ -797,6 +797,7 @@ static bool offscreen_render_surface_init_buffers(
 		// TODO: does this work with multi-planar format modifiers?
 		// do we have to use vkBindImageMemory2 and VkBindImagePlaneMemoryInfo?
 		// we know that we only need one memory object (only one gbm_bo).
+		// EDIT: probably not true... gbm_bo's can have mutliple memory planes
 		if (rs->gbm_dev) {
 			uint64_t gbm_mod;
 			const VkExternalMemoryHandleTypeFlagBits htype =
@@ -814,8 +815,6 @@ static bool offscreen_render_surface_init_buffers(
 					// other buffers with the same modifier
 					gbm_mod = gbm_bo_get_modifier(buf->bo);
 					rs->modifier = gbm_mod;
-					modifiers = &rs->modifier;
-					mod_count = 1;
 				}
 			}
 
@@ -830,7 +829,7 @@ static bool offscreen_render_surface_init_buffers(
 				goto error;
 			}
 
-			int fd = gbm_bo_get_fd(buf->bo);
+			int fd = gbm_bo_get_fd(buf->bo); // TODO: or gbm_bo_get_handle?
 			if (fd < 0) {
 				wlr_log_errno(WLR_ERROR, "Failed to retrieve gbm_bo fd");
 				goto error;
@@ -876,7 +875,7 @@ static bool offscreen_render_surface_init_buffers(
 					plane_layouts[i].size = 0;
 				}
 
-				mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_LIST_CREATE_INFO_EXT;
+				mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
 				mod_info.drmFormatModifierPlaneCount = plane_count;
 				mod_info.drmFormatModifier = rs->modifier;
 				mod_info.pPlaneLayouts = plane_layouts;
@@ -1224,8 +1223,9 @@ struct wlr_render_surface *vulkan_render_surface_create_gbm(
 	// guaranteed to work.
 	if (common_mod_count == 0) {
 		// make sure that dmabufs are supported at all
+		// TODO: invalid or linear?
 		struct wlr_vk_format_modifier_props *mp =
-			wlr_vk_format_props_find_modifier(fmtp, DRM_FORMAT_MOD_INVALID);
+			wlr_vk_format_props_find_modifier(fmtp, DRM_FORMAT_MOD_LINEAR);
 		if (!mp || !(mp->dmabuf_flags & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
 			wlr_log(WLR_ERROR, "Can't import dmabufs with given format");
 			goto error;
