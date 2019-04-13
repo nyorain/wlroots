@@ -40,109 +40,6 @@ static VkImageAspectFlagBits mem_plane_ascpect(unsigned i) {
 	}
 }
 
-// TODO: add and use pipes, ds layout
-static struct wlr_vk_ycbcr_setup *get_ycbcr_setup(struct wlr_vk_renderer *renderer,
-		VkFormat format, VkFormatFeatureFlags format_features, bool alpha) {
-	assert(renderer->dev->features.ycbcr);
-	struct wlr_vk_ycbcr_setup *setup = wlr_vk_find_ycbcr_setup(renderer, format);
-	if (setup) {
-		return setup;
-	}
-
-	// create new setup
-	VkResult res;
-	VkDevice dev = renderer->dev->dev;
-
-	setup = calloc(1, sizeof(*setup));
-	if (!setup) {
-		wlr_log_errno(WLR_ERROR, "Allocation failed");
-		goto destroy_sampler;
-	}
-
-	setup->format = format;
-
-	// conversion
-	VkSamplerYcbcrConversionCreateInfo conversioni = {0};
-	conversioni.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO;
-	conversioni.format = format;
-	// XXX: yeah, absolute no idea on those three
-	// explained in more detail in the vulkan spec
-	conversioni.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_601;
-	conversioni.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_FULL;
-	conversioni.forceExplicitReconstruction = false;
-
-	conversioni.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-	conversioni.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-	conversioni.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-	if (alpha) {
-		conversioni.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-	} else {
-		conversioni.components.a = VK_COMPONENT_SWIZZLE_ONE;
-	}
-
-	// XXX: really prefer midpoint?
-	if (format_features & VK_FORMAT_FEATURE_MIDPOINT_CHROMA_SAMPLES_BIT) {
-		conversioni.xChromaOffset = VK_CHROMA_LOCATION_MIDPOINT;
-		conversioni.yChromaOffset = VK_CHROMA_LOCATION_MIDPOINT;
-	} else if (format_features & VK_FORMAT_FEATURE_COSITED_CHROMA_SAMPLES_BIT) {
-		conversioni.xChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
-		conversioni.yChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
-	} else {
-		wlr_log(WLR_ERROR, "Format does support no chroma sampling mode");
-		goto error;
-	}
-
-	VkFormatFeatureFlags linear_bit =
-		VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_LINEAR_FILTER_BIT;
-	if (format_features & linear_bit) {
-		conversioni.chromaFilter = VK_FILTER_LINEAR;
-	} else {
-		conversioni.chromaFilter = VK_FILTER_NEAREST;
-	}
-
-	res = vkCreateSamplerYcbcrConversion(dev, &conversioni, NULL,
-		&setup->conversion);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("vkCreateSamplerYcbcrConversion", res);
-		goto error;
-	}
-
-	// sampler
-	VkSamplerCreateInfo sampleri = {0};
-	sampleri.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	sampleri.magFilter = VK_FILTER_LINEAR;
-	sampleri.minFilter = VK_FILTER_LINEAR;
-	sampleri.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-	sampleri.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sampleri.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sampleri.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sampleri.maxAnisotropy = 1.f;
-	sampleri.minLod = 0.f;
-	sampleri.maxLod = 0.25f;
-	sampleri.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-
-	VkSamplerYcbcrConversionInfo sampler_conversioni = {0};
-	sampler_conversioni.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-	sampler_conversioni.conversion = setup->conversion;
-	sampleri.pNext = &sampler_conversioni;
-
-	res = vkCreateSampler(dev, &sampleri, NULL, &setup->sampler);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create sampler", res);
-		goto destroy_conversion;
-	}
-
-	wl_list_insert(&renderer->ycbcr_setups, &setup->link);
-	return setup;
-
-destroy_sampler:
-	vkDestroySampler(dev, setup->sampler, NULL);
-destroy_conversion:
-	vkDestroySamplerYcbcrConversion(dev, setup->conversion, NULL);
-error:
-	return NULL;
-}
-
 static void vulkan_texture_get_size(struct wlr_texture *wlr_texture, int *width,
 		int *height) {
 	struct wlr_vk_texture *texture = vulkan_get_texture(wlr_texture);
@@ -482,10 +379,6 @@ struct wlr_texture *wlr_vk_texture_from_pixels(struct wlr_vk_renderer *renderer,
 	view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
 	view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
 	view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-	// TODO: not allowed by spec
-	// if (!texture->format->has_alpha) {
-	// 	view_info.components.a = VK_COMPONENT_SWIZZLE_ONE;
-	// }
 
 	view_info.subresourceRange = (VkImageSubresourceRange) {
 		VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
@@ -497,8 +390,7 @@ struct wlr_texture *wlr_vk_texture_from_pixels(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_ycbcr_setup *ycbcr_setup = NULL;
 	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
 	if (fmt->format.ycbcr) {
-		ycbcr_setup = get_ycbcr_setup(renderer,
-			fmt->format.vk_format, fmt->features, fmt->format.has_alpha);
+		ycbcr_setup = wlr_vk_find_ycbcr_setup(renderer, fmt, true);
 		if (!ycbcr_setup) {
 			wlr_vk_error("Could not create ycbcr sampler", res);
 			goto error;
@@ -526,14 +418,6 @@ struct wlr_texture *wlr_vk_texture_from_pixels(struct wlr_vk_renderer *renderer,
 	VkDescriptorImageInfo ds_img_info = {0};
 	ds_img_info.imageView = texture->image_view;
 	ds_img_info.imageLayout = layout;
-	if (fmt->format.ycbcr) {
-		ds_img_info.sampler = ycbcr_setup->sampler;
-		if (!ds_img_info.sampler) {
-			goto error;
-		}
-	} else {
-		ds_img_info.sampler = renderer->sampler;
-	}
 
 	VkWriteDescriptorSet ds_write = {0};
 	ds_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -684,9 +568,9 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 			plane_layouts[i].size = 0;
 		}
 
-		// uint32_t f = drm_from_shm_format(attribs->format);
-		// wlr_log(WLR_INFO, "importing dmabuf image with format %.4s and modifier %lu (%lu)",
-		// 	(const char*) &f, mod->props.drmFormatModifier, attribs->modifier);
+		uint32_t f = drm_from_shm_format(attribs->format);
+		wlr_log(WLR_INFO, "importing dmabuf image with format %.4s and modifier %lu (%lu)",
+			(const char*) &f, mod->props.drmFormatModifier, attribs->modifier);
 
 		mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
 		mod_info.drmFormatModifierPlaneCount = plane_count;
@@ -834,10 +718,6 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 	view_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
 	view_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
 	view_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-	// TODO: not allowed by spec
-	// if (!texture->format->has_alpha) {
-	// 	view_info.components.a = VK_COMPONENT_SWIZZLE_ONE;
-	// }
 
 	view_info.subresourceRange = (VkImageSubresourceRange) {
 		VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
@@ -849,13 +729,13 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_ycbcr_setup *ycbcr_setup = NULL;
 	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
 	if (fmt->format.ycbcr) {
-		ycbcr_setup = get_ycbcr_setup(renderer,
-			fmt->format.vk_format, fmt->features, fmt->format.has_alpha);
+		ycbcr_setup = wlr_vk_find_ycbcr_setup(renderer, fmt, true);
 		if (!ycbcr_setup) {
 			wlr_vk_error("Could not create ycbcr setup", res);
 			goto error;
 		}
 
+		wlr_log(WLR_INFO, "using conversion: %p", &ycbcr_setup->conversion);
 		conversion_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
 		conversion_info.conversion = ycbcr_setup->conversion;
 		view_info.pNext = &conversion_info;
@@ -878,15 +758,7 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 	VkDescriptorImageInfo ds_img_info = {0};
 	ds_img_info.imageView = texture->image_view;
 	ds_img_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-	if (fmt->format.ycbcr) {
-		ds_img_info.sampler = ycbcr_setup->sampler;
-	} else {
-		ds_img_info.sampler = renderer->sampler;
-	}
 
-	// TODO: nope we are apparently not allowed to set the sampler here,
-	// it must have been set immutably in the descripto set layout for
-	// ycbcr images...
 	VkWriteDescriptorSet ds_write = {0};
 	ds_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 	ds_write.descriptorCount = 1;

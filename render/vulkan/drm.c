@@ -62,6 +62,7 @@ static void drm_create_prime_buffer(struct wl_client *client,
 			continue;
 		}
 
+		// TODO: doesn't have to be linear
 		struct wlr_vk_format_modifier_props *fmod =
 			wlr_vk_format_props_find_modifier(props, DRM_FORMAT_MOD_LINEAR);
 		if (fmod && (fmod->dmabuf_flags &
@@ -72,7 +73,7 @@ static void drm_create_prime_buffer(struct wl_client *client,
 	}
 
 	if (!mod) {
-		wlr_log_errno(WLR_ERROR, "Client passed unsupported format");
+		wlr_log(WLR_ERROR, "Client passed unsupported format");
 		wl_resource_post_error(resource, WL_DRM_ERROR_INVALID_FORMAT,
 			"format not supported by renderer");
         return;
@@ -208,6 +209,9 @@ static void bind_drm(struct wl_client *client, void *data, uint32_t version,
 
 void vulkan_bind_wl_drm(struct wlr_renderer *wlr_renderer,
 		struct wl_display *wl_display) {
+	// TODO
+	return;
+
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 	renderer->wl_drm = wl_global_create(wl_display,
 		&wl_drm_interface, 2, renderer, bind_drm);

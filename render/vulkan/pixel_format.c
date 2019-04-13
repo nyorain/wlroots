@@ -252,8 +252,8 @@ bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
 
 	props->modifier_count = 0;
 	uint32_t f = drm_from_shm_format(format->wl_format);
-	wlr_log(WLR_INFO, "%d modifiers on format %.4s", (int) modp.drmFormatModifierCount,
-		(const char*) &f);
+	wlr_log(WLR_INFO, "%d modifiers on format %.4s",
+		(int) modp.drmFormatModifierCount, (const char*) &f);
 	if (modp.drmFormatModifierCount > 0) {
 		// the first call to vkGetPhysicalDeviceFormatProperties2 did only
 		// retrieve the number of modifiers, we now have to retrieve
@@ -300,6 +300,8 @@ bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
 			res = vkGetPhysicalDeviceImageFormatProperties2(dev->phdev,
 				&fmti, &ifmtp);
 			if (res != VK_SUCCESS) {
+				wlr_log(WLR_INFO, "modifier %lu on format %.4s not suppored",
+					m.drmFormatModifier, (const char*) &f);
 				if (res != VK_ERROR_FORMAT_NOT_SUPPORTED) {
 					wlr_vk_error("vkGetPhysicalDeviceImageFormatProperties2",
 						res);
@@ -307,7 +309,7 @@ bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
 				continue;
 			}
 
-			unsigned c = props->modifier_count;
+			unsigned c = props->modifier_count++;
 			VkExtent3D me = ifmtp.imageFormatProperties.maxExtent;
 			VkExternalMemoryProperties emp = efmtp.externalMemoryProperties;
 			props->modifiers[c].props = m;
@@ -317,7 +319,6 @@ bool wlr_vk_format_props_query(struct wlr_vk_device *dev,
 			props->modifiers[c].export_imported =
 				(emp.exportFromImportedHandleTypes &
 				 VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT);
-			++props->modifier_count;
 
 			wlr_log(WLR_INFO, "modifier %lu on format %.4s",
 				m.drmFormatModifier, (const char*) &f);

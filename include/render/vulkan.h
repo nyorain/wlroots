@@ -158,7 +158,7 @@ struct wlr_vk_ycbcr_setup {
 	// Therefore each format we support also needs it own pipe layout
 	// and therefore own texture pipe.
 	VkDescriptorSetLayout ds_layout;
-	VkPipelineLayout pipeline_layout;
+	VkPipelineLayout pipe_layout;
 	VkPipeline tex_pipe;
 };
 
@@ -178,11 +178,14 @@ struct wlr_vk_renderer {
 	VkPipeline ellipse_pipe;
 	VkFence fence;
 
+	VkShaderModule vert_module;
+	VkShaderModule tex_frag_module;
+
 	// texture rendering objects for non-ycbcr textures.
 	// For ycbcr see ycbcr_setups and struct wlr_vk_ycbcr_setup
 	VkDescriptorSetLayout ds_layout;
 	VkPipeline tex_pipe;
-	VkPipelineLayout pipeline_layout;
+	VkPipelineLayout pipe_layout;
 	VkSampler sampler;
 
 	// current frame id. Used in wlr_vk_texture.last_used
@@ -252,7 +255,8 @@ struct wlr_vk_descriptor_pool *wlr_vk_alloc_texture_ds(
 void wlr_vk_free_ds(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_descriptor_pool *pool, VkDescriptorSet ds);
 struct wlr_vk_ycbcr_setup *wlr_vk_find_ycbcr_setup(
-	struct wlr_vk_renderer *renderer, VkFormat format);
+	struct wlr_vk_renderer *renderer, const struct wlr_vk_format_props *fmt,
+	bool create_if_not_found);
 struct wlr_vk_format_props *wlr_vk_format_from_wl(
 	struct wlr_vk_renderer *renderer, enum wl_shm_format format);
 struct wlr_vk_renderer *vulkan_get_renderer(struct wlr_renderer *r);
