@@ -655,7 +655,7 @@ struct wlr_texture *wlr_vk_texture_from_dmabuf(struct wlr_vk_renderer *renderer,
 		int mem = wlr_vk_find_mem_type(renderer->dev, 0,
 			memr.memoryRequirements.memoryTypeBits & fdp.memoryTypeBits);
 		if (mem < 0) {
-			wlr_vk_error("no valid memory type index", res);
+			wlr_log(WLR_ERROR, "no valid memory type index");
 			goto error;
 		}
 

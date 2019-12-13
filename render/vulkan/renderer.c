@@ -607,7 +607,15 @@ static void vulkan_clear(struct wlr_renderer *wlr_renderer,
 	VkClearAttachment att = {0};
 	att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	att.colorAttachment = 0u;
-	memcpy(&att.clearValue.color.float32, color, 4 * sizeof(float));
+
+	// input color values are given in srgb space, vulkan expects
+	// them in linear space.
+	// TODO: correct srgb conversion, not just pow approx
+	att.clearValue.color.float32[0] = pow(color[0], 2.2);
+	att.clearValue.color.float32[1] = pow(color[1], 2.2);
+	att.clearValue.color.float32[2] = pow(color[2], 2.2);
+	att.clearValue.color.float32[3] = pow(color[3], 2.2);
+	// memcpy(&att.clearValue.color.float32, color, 4 * sizeof(float));
 
 	VkClearRect rect = {0};
 	rect.rect = renderer->scissor;
@@ -1405,7 +1413,7 @@ struct wlr_renderer *wlr_vk_renderer_create_for_device(
 
 	// we currently force bgra format on swapchain creation
 	// this could also be deferred until the first render surface is created.
-	if (!init_pipelines(renderer, VK_FORMAT_B8G8R8A8_UNORM)) {
+	if (!init_pipelines(renderer, VK_FORMAT_B8G8R8A8_SRGB)) {
 		goto error;
 	}
 

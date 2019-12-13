@@ -7,7 +7,7 @@
 static const struct wlr_vk_format formats[] = {
 	{
 		.wl_format = WL_SHM_FORMAT_ARGB8888,
-		.vk_format = VK_FORMAT_B8G8R8A8_UNORM,
+		.vk_format = VK_FORMAT_B8G8R8A8_SRGB,
 		.has_alpha = true,
 		.ycbcr = false,
 		.plane_count = 1,
@@ -19,7 +19,7 @@ static const struct wlr_vk_format formats[] = {
 	},
 	{
 		.wl_format = WL_SHM_FORMAT_XRGB8888,
-		.vk_format = VK_FORMAT_B8G8R8A8_UNORM,
+		.vk_format = VK_FORMAT_B8G8R8A8_SRGB,
 		.has_alpha = false,
 		.ycbcr = false,
 		.plane_count = 1,
@@ -31,7 +31,7 @@ static const struct wlr_vk_format formats[] = {
 	},
 	{
 		.wl_format = WL_SHM_FORMAT_XBGR8888,
-		.vk_format = VK_FORMAT_R8G8B8A8_UNORM,
+		.vk_format = VK_FORMAT_R8G8B8A8_SRGB,
 		.has_alpha = false,
 		.ycbcr = false,
 		.plane_count = 1,
@@ -43,7 +43,7 @@ static const struct wlr_vk_format formats[] = {
 	},
 	{
 		.wl_format = WL_SHM_FORMAT_ABGR8888,
-		.vk_format = VK_FORMAT_R8G8B8A8_UNORM,
+		.vk_format = VK_FORMAT_R8G8B8A8_SRGB,
 		.has_alpha = true,
 		.ycbcr = false,
 		.plane_count = 1,
@@ -55,6 +55,8 @@ static const struct wlr_vk_format formats[] = {
 	},
 	// TODO: not sure about mapping/byte order from here
 	// switch first two?
+	// TODO: these should be srgb as well i guess... we might have
+	// to transform them in shader, manually
 	{
 		.wl_format = WL_SHM_FORMAT_YUYV,
 		.vk_format = VK_FORMAT_B8G8R8G8_422_UNORM,

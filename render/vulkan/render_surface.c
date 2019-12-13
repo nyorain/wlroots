@@ -303,10 +303,10 @@ static bool wlr_vk_swapchain_init(struct wlr_vk_swapchain *swapchain,
 	info.imageFormat = formats[0].format;
 	info.imageColorSpace = formats[0].colorSpace;
 	if (formats_count == 1 && formats[0].format == VK_FORMAT_UNDEFINED) {
-		info.imageFormat = VK_FORMAT_B8G8R8A8_UNORM;
+		info.imageFormat = VK_FORMAT_B8G8R8A8_SRGB;
 	} else {
 		for (unsigned i = 0; i < formats_count; ++i) {
-			if (formats[i].format == VK_FORMAT_B8G8R8A8_UNORM) {
+			if (formats[i].format == VK_FORMAT_B8G8R8A8_SRGB) {
 				info.imageFormat = formats[i].format;
 				info.imageColorSpace = formats[i].colorSpace;
 				break;
@@ -318,7 +318,7 @@ static bool wlr_vk_swapchain_init(struct wlr_vk_swapchain *swapchain,
 	// since we currently create the renderpass _before_ surfaces/swapchains
 	// and use b8g8r8a8 format there, we fail if it is no available
 	// could defer renderpass creation until first render surface is created
-	if (info.imageFormat != VK_FORMAT_B8G8R8A8_UNORM) {
+	if (info.imageFormat != VK_FORMAT_B8G8R8A8_SRGB) {
 		wlr_log(WLR_ERROR, "can't create swapchain with b8g8r8a8 format");
 		free(formats);
 		return NULL;
@@ -798,6 +798,8 @@ static bool offscreen_render_surface_init_buffers(
 		// do we have to use vkBindImageMemory2 and VkBindImagePlaneMemoryInfo?
 		// we know that we only need one memory object (only one gbm_bo).
 		// EDIT: probably not true... gbm_bo's can have mutliple memory planes
+		// See texture dmabuf importing for correct multi-plane impl.
+		// they two can probably share a common function?
 		if (rs->gbm_dev) {
 			uint64_t gbm_mod;
 			const VkExternalMemoryHandleTypeFlagBits htype =
@@ -828,6 +830,8 @@ static bool offscreen_render_surface_init_buffers(
 				wlr_log_errno(WLR_ERROR, "Failed to create gbm_bo");
 				goto error;
 			}
+
+			wlr_log(WLR_INFO, "Using modifier %lu for render buffer", gbm_mod);
 
 			int fd = gbm_bo_get_fd(buf->bo); // TODO: or gbm_bo_get_handle?
 			if (fd < 0) {
