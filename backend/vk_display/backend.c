@@ -39,7 +39,8 @@ static void *frame_wait_thread(void *data) {
 		}
 
 		bool exit = false;
-		assert(!pthread_mutex_lock(&output->frame_mutex)); {
+		int err = pthread_mutex_lock(&output->frame_mutex); {
+			assert(!err);
 			if (output->destroy) {
 				exit = true;
 			} else if (res == VK_SUCCESS) { // vblank fence was signaled
@@ -56,7 +57,8 @@ static void *frame_wait_thread(void *data) {
 				output->frame = output->frame_next;
 				output->frame_next = VK_NULL_HANDLE;
 			}
-		} assert(!pthread_mutex_unlock(&output->frame_mutex));
+		} err = pthread_mutex_unlock(&output->frame_mutex);
+		assert(!err);
 
 		if (exit) {
 			return NULL;
@@ -69,7 +71,9 @@ static bool register_frame(struct wlr_vk_display_output *output) {
 	VkResult res;
 	int r;
 
-	assert(!pthread_mutex_lock(&output->frame_mutex)); {
+	int err = pthread_mutex_lock(&output->frame_mutex);
+	{
+		assert(!err);
 		if (output->frame_next) {
 			vkDestroyFence(dev->dev, output->frame_next, NULL);
 		}
@@ -79,18 +83,19 @@ static bool register_frame(struct wlr_vk_display_output *output) {
 		event_info.displayEvent = VK_DISPLAY_EVENT_TYPE_FIRST_PIXEL_OUT_EXT;
 		res = output->backend->registerDisplayEventEXT(dev->dev,
 			output->props.display, &event_info, NULL, &output->frame_next);
-	} assert(!pthread_mutex_unlock(&output->frame_mutex));
+	} err = pthread_mutex_unlock(&output->frame_mutex);
+	assert(!err);
 
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("vkRegisterDisplayEventEXT", res);
 		return false;
 	}
 
-	assert(!pthread_cond_signal(&output->frame_cond));
+	pthread_cond_signal(&output->frame_cond);
 
 	if (!output->frame_thread) {
-		assert(!pthread_mutex_init(&output->frame_mutex, NULL));
-		assert(!pthread_cond_init(&output->frame_cond, NULL));
+		pthread_mutex_init(&output->frame_mutex, NULL);
+		pthread_cond_init(&output->frame_cond, NULL);
 		r = pthread_create(&output->frame_thread, NULL,
 			frame_wait_thread, output);
 		if (r) {
@@ -302,14 +307,14 @@ static void display_destroy(struct wlr_output *o) {
 	struct wlr_vk_display_output *output = (struct wlr_vk_display_output *)o;
 	struct wlr_vk_device *dev = output->backend->renderer->dev;
 	if (output->frame_thread) {
-		assert(!pthread_mutex_lock(&output->frame_mutex)); {
+		pthread_mutex_lock(&output->frame_mutex); {
 			output->destroy = true;
-		} assert(!pthread_mutex_unlock(&output->frame_mutex));
-		assert(!pthread_cond_signal(&output->frame_cond));
-		assert(!pthread_join(output->frame_thread, NULL));
+		} pthread_mutex_unlock(&output->frame_mutex);
+		pthread_cond_signal(&output->frame_cond);
+		pthread_join(output->frame_thread, NULL);
 
-		assert(!pthread_mutex_destroy(&output->frame_mutex));
-		assert(!pthread_cond_destroy(&output->frame_cond));
+		pthread_mutex_destroy(&output->frame_mutex);
+		pthread_cond_destroy(&output->frame_cond);
 	}
 	if (output->frame) {
 		vkDestroyFence(dev->dev, output->frame, NULL);
