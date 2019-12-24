@@ -46,7 +46,7 @@ const char *vulkan_strerror(VkResult err) {
 		default:
 			return "<unknown>";
 	}
-	#undef STR
+	#undef ERR_STR
 }
 
 void vulkan_change_layout(VkCommandBuffer cb, VkImage img,
