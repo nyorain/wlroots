@@ -89,6 +89,7 @@ features = {
 	'xcb-errors': false,
 	'xcb-icccm': false,
 	'xdg-foreign': false,
+	'vulkan': false,
 }
 
 wayland_server = dependency('wayland-server', version: '>=1.19')

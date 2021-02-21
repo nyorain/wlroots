@@ -7,3 +7,5 @@ build/
 build-*/
 wayland-*-protocol.*
 wlr-example.ini
+compile_commands.json
+.cache/
