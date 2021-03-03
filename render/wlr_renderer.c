@@ -4,6 +4,7 @@
 #include <gbm.h>
 #include <wlr/render/egl.h>
 #include <wlr/render/gles2.h>
+#include <wlr/render/vulkan.h>
 #include <wlr/render/interface.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_matrix.h>
@@ -252,6 +253,9 @@ bool wlr_renderer_init_wl_display(struct wlr_renderer *r,
 }
 
 struct wlr_renderer *wlr_renderer_autocreate_with_drm_fd(int drm_fd) {
+	return wlr_vk_renderer_create();
+
+	/*
 	struct gbm_device *gbm_device = gbm_create_device(drm_fd);
 	if (!gbm_device) {
 		wlr_log(WLR_ERROR, "Failed to create GBM device");
@@ -274,6 +278,7 @@ struct wlr_renderer *wlr_renderer_autocreate_with_drm_fd(int drm_fd) {
 	}
 
 	return renderer;
+	*/
 }
 
 struct wlr_renderer *wlr_renderer_autocreate(struct wlr_backend *backend) {

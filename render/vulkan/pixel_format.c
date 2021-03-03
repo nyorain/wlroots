@@ -239,6 +239,7 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 
 	bool add_fmt_props = false;
 	struct wlr_vk_format_props props = {0};
+	props.format = *format;
 
 	// NOTE: vulkan gets a bit messy here. We need these features when
 	// creating a ycbcr feature - even for dmabuff imported features (even
@@ -323,6 +324,10 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 					add_fmt_props = true;
 					wlr_drm_format_set_add(&dev->dmabuf_render_formats,
 						format->drm_format, m.drmFormatModifier);
+
+					wlr_log(WLR_INFO, "vulkan: Format %" PRIu32 ", mod %"PRIu64
+						" supported for rendering", format->drm_format,
+						m.drmFormatModifier);
 				}
 			}
 
@@ -354,6 +359,10 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 					add_fmt_props = true;
 					wlr_drm_format_set_add(&dev->dmabuf_texture_formats,
 						format->drm_format, m.drmFormatModifier);
+
+					wlr_log(WLR_INFO, "vulkan: Format %" PRIu32 ", mod %"PRIu64
+						" supported for texture", format->drm_format,
+						m.drmFormatModifier);
 				}
 			}
 		}
@@ -380,6 +389,7 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 			props.max_extent.width = me.width;
 			props.max_extent.height = me.height;
 
+			wlr_log(WLR_INFO, "vulkan: Format %" PRIu32 " supported for textures", format->drm_format);
 			dev->shm_formats[dev->shm_format_count] = format->drm_format;
 			++dev->shm_format_count;
 

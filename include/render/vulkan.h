@@ -10,6 +10,9 @@
 #include <wlr/render/drm_format_set.h>
 #include <wlr/render/interface.h>
 
+#undef VK_QUEUE_FAMILY_FOREIGN_EXT
+#define VK_QUEUE_FAMILY_FOREIGN_EXT VK_QUEUE_FAMILY_EXTERNAL
+
 struct wlr_vk_descriptor_pool;
 
 // Central vulkan state that should only be needed once per compositor.
