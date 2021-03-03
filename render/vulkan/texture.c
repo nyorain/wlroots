@@ -234,7 +234,8 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 	const struct wlr_vk_format_props *fmt =
 		wlr_vk_format_from_drm(renderer->dev, drm_fmt);
 	if (fmt == NULL) {
-		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32, drm_fmt);
+		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32 " (%.4s)",
+			drm_fmt, (const char*) &drm_fmt);
 		return NULL;
 	}
 
@@ -387,7 +388,8 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_format_props *fmt = wlr_vk_format_from_drm(renderer->dev,
 		attribs->format);
 	if (fmt == NULL) {
-		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32, attribs->format);
+		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32 " (%.4s)",
+			attribs->format, (const char*) &attribs->format);
 		return VK_NULL_HANDLE;
 	}
 
@@ -460,7 +462,9 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 	img_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	img_info.initialLayout = VK_IMAGE_LAYOUT_PREINITIALIZED;
 	img_info.extent = (VkExtent3D) { attribs->width, attribs->height, 1 };
-	img_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+	img_info.usage = for_render ?
+		VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT :
+		VK_IMAGE_USAGE_SAMPLED_BIT;
 	if (disjoint) {
 		img_info.flags = VK_IMAGE_CREATE_DISJOINT_BIT;
 	}

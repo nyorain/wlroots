@@ -161,7 +161,7 @@ struct wlr_vk_instance *wlr_vk_instance_create(
 	application_info.applicationVersion = compositor_version;
 	application_info.pEngineName = "wlroots";
 	application_info.engineVersion = WLR_VERSION_NUM;
-	application_info.apiVersion = VK_MAKE_VERSION(1,1,0);
+	application_info.apiVersion = VK_API_VERSION_1_2;
 
 	// standard_validation: reports error in api usage to debug callback
 	// renderdoc: allows to capture (and debug) frames with renderdoc
@@ -259,7 +259,6 @@ void wlr_vk_instance_destroy(struct wlr_vk_instance *ini) {
 struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		VkPhysicalDevice phdev, unsigned ext_count, const char **exts) {
 	VkResult res;
-	const char *name;
 
 	// check for extensions
 	uint32_t avail_extc = 0;
@@ -309,16 +308,6 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		dev->extensions[dev->extension_count++] = exts[i];
 	}
 
-	name = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
-	if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
-		dev->extensions[dev->extension_count++] = name;
-
-		name = VK_EXT_DISPLAY_CONTROL_EXTENSION_NAME;
-		if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
-			dev->extensions[dev->extension_count++] = name;
-		}
-	}
-
 	// for dmabuf/drm importing we require at least the
 	// 'external_memory_fd, external_memory_dma_buf, queue_family_foreign'
 	// extensions. So only enable them if all three are available (assumption
@@ -326,31 +315,19 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	const char *names[] = {
 		VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
 		VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
-		VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+		// VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+		VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
 	};
 
 	unsigned nc = sizeof(names) / sizeof(names[0]);
-	bool has_dmabuf = false;
-	if (find_extensions(avail_ext_props, avail_extc, names, nc) == NULL) {
-		has_dmabuf = true;
-		for (unsigned i = 0u; i < nc; ++i) {
-			dev->extensions[dev->extension_count++] = names[i];
-		}
-
-		// doesn't strictly depend on any of the two but we have no
-		// use for this without the dma_buf extension
-		name = VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME;
-		if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
-			dev->extensions[dev->extension_count++] = name;
-		}
-	} else {
+	if (find_extensions(avail_ext_props, avail_extc, names, nc) != NULL) {
+		// TODO: better error output! We can land here often in practice
 		wlr_log(WLR_ERROR, "vulkan: required dmabuf extensions not found");
 		goto error;
 	}
 
-	name = VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME;
-	if (find_extensions(avail_ext_props, avail_extc, &name, 1) == NULL) {
-		dev->extensions[dev->extension_count++] = name;
+	for (unsigned i = 0u; i < nc; ++i) {
+		dev->extensions[dev->extension_count++] = names[i];
 	}
 
 	// check/enable features
@@ -410,14 +387,12 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	vkGetDeviceQueue(dev->dev, dev->queue_family, 0, &dev->queue);
 
 	// load api
-	if (has_dmabuf) {
-		dev->api.getMemoryFdPropertiesKHR =
-			(PFN_vkGetMemoryFdPropertiesKHR) vkGetDeviceProcAddr(
-					dev->dev, "vkGetMemoryFdPropertiesKHR");
-		if (!dev->api.getMemoryFdPropertiesKHR) {
-			wlr_log(WLR_ERROR, "Failed to retrieve required dev func pointers");
-			goto error;
-		}
+	dev->api.getMemoryFdPropertiesKHR =
+		(PFN_vkGetMemoryFdPropertiesKHR) vkGetDeviceProcAddr(
+				dev->dev, "vkGetMemoryFdPropertiesKHR");
+	if (!dev->api.getMemoryFdPropertiesKHR) {
+		wlr_log(WLR_ERROR, "Failed to retrieve required dev func pointers");
+		goto error;
 	}
 
 	// - check device format support -
