@@ -629,6 +629,9 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 		return NULL;
 	}
 
+	wlr_texture_init(&texture->wlr_texture, &texture_impl,
+		attribs->width, attribs->height);
+
 	texture->renderer = renderer;
 	texture->format = &fmt->format;
 
