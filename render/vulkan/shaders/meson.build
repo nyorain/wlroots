@@ -19,4 +19,3 @@ foreach shader : vulkan_shaders_src
 endforeach
 
 wlr_files += vulkan_shaders
-
