@@ -323,16 +323,10 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	// 'external_memory_fd, external_memory_dma_buf, queue_family_foreign'
 	// extensions. So only enable them if all three are available (assumption
 	// throughout the codebase).
-	// Strictly speaking importing images is only possible with the drm mod
-	// extension as well, when it's supported in common drivers remove the
-	// legacy (without modifiers) image dmabuf import code (not guaranteed
-	// to work; guessing) and require it as well for importing support
 	const char *names[] = {
 		VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
 		VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
-#ifdef WLR_VK_FOREIGN_QF
 		VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
-#endif
 	};
 
 	unsigned nc = sizeof(names) / sizeof(names[0]);
@@ -350,8 +344,8 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 			dev->extensions[dev->extension_count++] = name;
 		}
 	} else {
-		wlr_log(WLR_ERROR, "dmabuf extensions no found, Vulkan renderer will "
-			"have no support for importing external dma/wl_drm buffers");
+		wlr_log(WLR_ERROR, "vulkan: required dmabuf extensions not found");
+		goto error;
 	}
 
 	name = VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME;
@@ -426,6 +420,20 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		}
 	}
 
+	// - check device format support -
+	size_t max_fmts;
+	const struct wlr_vk_format *fmts = vulkan_get_format_list(&max_fmts);
+	dev->shm_formats = calloc(max_fmts, sizeof(*dev->shm_formats));
+	dev->format_props = calloc(max_fmts, sizeof(*dev->format_props));
+	if (!dev->shm_formats || !dev->format_props) {
+		wlr_log_errno(WLR_ERROR, "allocation failed");
+		goto error;
+	}
+
+	for (unsigned i = 0u; i < max_fmts; ++i) {
+		wlr_vk_format_props_query(dev, &fmts[i]);
+	}
+
 	return dev;
 
 error:
@@ -442,6 +450,15 @@ void wlr_vk_device_destroy(struct wlr_vk_device *dev) {
 		vkDestroyDevice(dev->dev, NULL);
 	}
 
+	wlr_drm_format_set_finish(&dev->dmabuf_render_formats);
+	wlr_drm_format_set_finish(&dev->dmabuf_texture_formats);
+
+	for (unsigned i = 0u; i < dev->format_prop_count; ++i) {
+		wlr_vk_format_props_finish(&dev->format_props[i]);
+	}
+
 	free(dev->extensions);
+	free(dev->shm_formats);
+	free(dev->format_props);
 	free(dev);
 }
