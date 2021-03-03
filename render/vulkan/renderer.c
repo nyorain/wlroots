@@ -644,6 +644,8 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL,
 		barrier_count, release_barriers);
 
+	vkEndCommandBuffer(renderer->cb);
+
 	unsigned submit_count = 0u;
 	VkSubmitInfo submit_infos[2] = {0};
 
@@ -1519,6 +1521,17 @@ struct wlr_renderer *wlr_vk_renderer_create_for_device(struct wlr_vk_device *dev
 		goto error;
 	}
 
+	VkCommandBufferAllocateInfo cbai = {0};
+	cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	cbai.commandBufferCount = 1u;
+	cbai.commandPool = renderer->command_pool;
+	cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	res = vkAllocateCommandBuffers(dev->dev, &cbai, &renderer->cb);
+	if (res != VK_SUCCESS) {
+		wlr_vk_error("vkAllocateCommandBuffers", res);
+		goto error;
+	}
+
 	VkFenceCreateInfo fence_info = {0};
 	fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	res = vkCreateFence(dev->dev, &fence_info, NULL,
@@ -1570,11 +1583,11 @@ struct wlr_renderer *wlr_vk_renderer_create(void) {
 	//  - supported extensions, external memory import properties
 	//  - (as default, without user preference) integrated vs dedicated
 	//  - extensions to match it with drm/backend fd
-	uint32_t num_devs = 2;
-	VkPhysicalDevice phdevs[2];
+	uint32_t num_devs = 3;
+	VkPhysicalDevice phdevs[3];
 	res = vkEnumeratePhysicalDevices(ini->instance, &num_devs,
 		phdevs);
-	if ((res != VK_SUCCESS && res != VK_INCOMPLETE) || num_devs < 2) {
+	if ((res != VK_SUCCESS && res != VK_INCOMPLETE) || num_devs < 1) {
 		wlr_log(WLR_ERROR, "Could not retrieve physical device");
 		free(ini);
 		return NULL;
@@ -1582,7 +1595,7 @@ struct wlr_renderer *wlr_vk_renderer_create(void) {
 
 	// TODO: temp to force intel gpu on my device.
 	// must be removed
-	VkPhysicalDevice phdev = phdevs[1];
+	VkPhysicalDevice phdev = phdevs[0];
 
 	// queue families
 	uint32_t qfam_count;
