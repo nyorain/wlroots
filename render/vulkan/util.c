@@ -100,27 +100,3 @@ bool vulkan_has_extension(unsigned count, const char **exts, const char *find) {
 
 	return false;
 }
-
-enum wl_shm_format shm_from_drm_format(uint32_t drm_format) {
-	if (drm_format == DRM_FORMAT_ARGB8888) {
-		return WL_SHM_FORMAT_ARGB8888;
-	} else if (drm_format == DRM_FORMAT_XRGB8888) {
-		return WL_SHM_FORMAT_XRGB8888;
-	}
-
-	// otherwise they match
-	// note that if given an invalid drm_format (or one without wl_shm match),
-	// an invalid format will be returned.
-	return (enum wl_shm_format) drm_format;
-}
-
-uint32_t drm_from_shm_format(enum wl_shm_format wl_format) {
-	if (wl_format == WL_SHM_FORMAT_ARGB8888) {
-		return DRM_FORMAT_ARGB8888;
-	} else if (wl_format == WL_SHM_FORMAT_XRGB8888) {
-		return DRM_FORMAT_XRGB8888;
-	}
-
-	return (uint32_t) wl_format;
-}
-

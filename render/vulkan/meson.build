@@ -3,7 +3,7 @@ glslang = find_program('glslangValidator', required: 'vulkan' in renderers)
 
 # TODO: we don't really need glslang, could include the precompiled shaders
 # in repo in case this makes it easier for anyone.
-if not vulkan.found() or not glslang.found()
+if not dep_vulkan.found() or not glslang.found()
 	subdir_done()
 endif
 
