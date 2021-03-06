@@ -18,6 +18,12 @@
 #include <render/vulkan/shaders/quad.frag.h>
 #include <render/vulkan/shaders/ellipse.frag.h>
 
+// TODO:
+// - simplify stage allocation, don't track allocations but use ringbuffer-like
+// - use a pipeline cache (not sure when to save though, after every pipeline
+//   creation?)
+// - create pipelines as derivatives of each other
+
 static const VkDeviceSize min_stage_size = 1024 * 1024; // 1MB
 static const VkDeviceSize max_stage_size = 64 * min_stage_size; // 64MB
 static const size_t start_descriptor_pool_size = 256u;
@@ -29,6 +35,13 @@ struct wlr_vk_renderer *vulkan_get_renderer(struct wlr_renderer *wlr_renderer) {
 	assert(wlr_renderer->impl == &renderer_impl);
 	return (struct wlr_vk_renderer *)wlr_renderer;
 }
+
+static struct wlr_vk_render_format_setup *find_or_create_render_setup(
+		struct wlr_vk_renderer *renderer, VkFormat format);
+static struct wlr_vk_ycbcr_pipeline *find_or_create_ycbcr_pipeline(
+		struct wlr_vk_renderer *renderer,
+		struct wlr_vk_render_format_setup *setup,
+		const struct wlr_vk_ycbcr_sampler *sampler);
 
 // vertex shader push constant range data
 struct vert_pcr_data {
@@ -122,30 +135,40 @@ void wlr_vk_free_ds(struct wlr_vk_renderer *renderer,
 	++pool->free;
 }
 
-static void destroy_ycbcr_setup(struct wlr_vk_renderer *renderer,
-		struct wlr_vk_ycbcr_setup *setup) {
+static void destroy_ycbcr_sampler(struct wlr_vk_renderer *renderer,
+		struct wlr_vk_ycbcr_sampler *sampler) {
+	if (!sampler) {
+		return;
+	}
+
+	VkDevice dev = renderer->dev->dev;
+	vkDestroySamplerYcbcrConversion(dev, sampler->conversion, NULL);
+	vkDestroySampler(dev, sampler->sampler, NULL);
+	vkDestroyDescriptorSetLayout(dev, sampler->ds_layout, NULL);
+	vkDestroyPipelineLayout(dev, sampler->pipe_layout, NULL);
+
+	wl_list_remove(&sampler->link);
+	free(sampler);
+}
+
+static void destroy_render_format_setup(struct wlr_vk_renderer *renderer,
+		struct wlr_vk_render_format_setup *setup) {
 	if (!setup) {
 		return;
 	}
 
 	VkDevice dev = renderer->dev->dev;
-	if (setup->conversion) {
-		vkDestroySamplerYcbcrConversion(dev, setup->conversion, NULL);
-	}
-	if (setup->sampler) {
-		vkDestroySampler(dev, setup->sampler, NULL);
-	}
-	if (setup->ds_layout) {
-		vkDestroyDescriptorSetLayout(dev, setup->ds_layout, NULL);
-	}
-	if (setup->pipe_layout) {
-		vkDestroyPipelineLayout(dev, setup->pipe_layout, NULL);
-	}
-	if (setup->tex_pipe) {
-		vkDestroyPipeline(dev, setup->tex_pipe, NULL);
-	}
+	vkDestroyRenderPass(dev, setup->render_pass, NULL);
+	vkDestroyPipeline(dev, setup->tex_pipe, NULL);
+	vkDestroyPipeline(dev, setup->quad_pipe, NULL);
+	vkDestroyPipeline(dev, setup->ellipse_pipe, NULL);
 
-	free(setup);
+	struct wlr_vk_ycbcr_pipeline *pipe, *tmp_pipe;
+	wl_list_for_each_safe(pipe, tmp_pipe, &setup->ycbcr_tex_pipes, link) {
+		vkDestroyPipeline(dev, pipe->tex_pipe, NULL);
+		wl_list_remove(&pipe->link);
+		free(pipe);
+	}
 }
 
 static void shared_buffer_destroy(struct wlr_vk_renderer *r,
@@ -415,6 +438,15 @@ static struct wlr_vk_render_buffer *create_render_buffer(
 		goto error_buffer;
 	}
 
+	// NOTE: we could at least support WLR_DMABUF_ATTRIBUTES_FLAGS_Y_INVERT
+	// if it is needed by anyone. Can be implemented using negative viewport
+	// height or flipping matrix.
+	if (dmabuf.flags != 0) {
+		wlr_log(WLR_ERROR, "dmabuf flags %x not supported/implemented on vulkan",
+			dmabuf.flags);
+		goto error_buffer;
+	}
+
 	buffer->image = vulkan_import_dmabuf(renderer, &dmabuf,
 		buffer->memories, &buffer->mem_count, true);
 	if (!buffer->image) {
@@ -448,6 +480,12 @@ static struct wlr_vk_render_buffer *create_render_buffer(
 		goto error_view;
 	}
 
+	buffer->render_setup = find_or_create_render_setup(
+		renderer, fmt->format.vk_format);
+	if (!buffer->render_setup) {
+		goto error_view;
+	}
+
 	VkFramebufferCreateInfo fb_info = {0};
 	fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 	fb_info.attachmentCount = 1u;
@@ -456,7 +494,7 @@ static struct wlr_vk_render_buffer *create_render_buffer(
 	fb_info.width = dmabuf.width;
 	fb_info.height = dmabuf.height;
 	fb_info.layers = 1u;
-	fb_info.renderPass = renderer->render_pass;
+	fb_info.renderPass = buffer->render_setup->render_pass;
 
 	res = vkCreateFramebuffer(dev, &fb_info, NULL, &buffer->framebuffer);
 	if (res != VK_SUCCESS) {
@@ -510,7 +548,8 @@ static bool vulkan_bind_buffer(struct wlr_renderer *wlr_renderer,
 	return true;
 }
 
-static void vulkan_begin(struct wlr_renderer *wlr_renderer, uint32_t width, uint32_t height) {
+static void vulkan_begin(struct wlr_renderer *wlr_renderer,
+		uint32_t width, uint32_t height) {
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 	assert(!renderer->recording_cb);
 	assert(renderer->current_render_buffer);
@@ -529,7 +568,7 @@ static void vulkan_begin(struct wlr_renderer *wlr_renderer, uint32_t width, uint
 	VkRenderPassBeginInfo rp_info = {0};
 	rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	rp_info.renderArea = rect;
-	rp_info.renderPass = renderer->render_pass;
+	rp_info.renderPass = renderer->current_render_buffer->render_setup->render_pass;
 	rp_info.framebuffer = fb;
 	rp_info.clearValueCount = 0;
 	vkCmdBeginRenderPass(cb, &rp_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -735,23 +774,22 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 	// created for in on creation. Vulkan basically requires special pipelines
 	// for rendering ycbcr textures
 	if (texture->format->ycbcr) {
-		const struct wlr_vk_format_props *fmt = wlr_vk_format_from_drm(
-			renderer->dev, texture->format->drm_format);
-		struct wlr_vk_ycbcr_setup *setup = wlr_vk_find_ycbcr_setup(
-			renderer, fmt, false);
-		if (!setup) {
-			wlr_log(WLR_ERROR, "Trying to render texture with ycbcr format "
-				"for which no pipeline was created");
+		assert(texture->ycbcr_sampler);
+		struct wlr_vk_ycbcr_pipeline *pipe = find_or_create_ycbcr_pipeline(
+			renderer, renderer->current_render_buffer->render_setup,
+			texture->ycbcr_sampler);
+
+		if (!pipe) {
 			return false;
 		}
 
 		vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			setup->tex_pipe);
+			pipe->tex_pipe);
 		vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			setup->pipe_layout, 0, 1, &texture->ds, 0, NULL);
+			texture->ycbcr_sampler->pipe_layout, 0, 1, &texture->ds, 0, NULL);
 	} else {
 		vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			renderer->tex_pipe);
+			renderer->current_render_buffer->render_setup->tex_pipe);
 		vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 			renderer->pipe_layout, 0, 1, &texture->ds, 0, NULL);
 	}
@@ -762,6 +800,11 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 	vert_pcr_data.uv_off[1] = box->y / wlr_texture->height;
 	vert_pcr_data.uv_size[0] = box->width / wlr_texture->width;
 	vert_pcr_data.uv_size[1] = box->height / wlr_texture->height;
+
+	if (texture->invert_y) {
+		vert_pcr_data.uv_off[1] += vert_pcr_data.uv_size[1];
+		vert_pcr_data.uv_size[1] = -vert_pcr_data.uv_size[1];
+	}
 
 	vkCmdPushConstants(cb, renderer->pipe_layout,
 		VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(vert_pcr_data), &vert_pcr_data);
@@ -830,7 +873,7 @@ static void vulkan_render_quad_with_matrix(struct wlr_renderer *wlr_renderer,
 	VkCommandBuffer cb = renderer->cb;
 
 	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		renderer->quad_pipe);
+		renderer->current_render_buffer->render_setup->quad_pipe);
 
 	struct vert_pcr_data  vert_pcr_data;
 	mat3_to_mat4(matrix, vert_pcr_data.mat4);
@@ -854,7 +897,7 @@ static void vulkan_render_ellipse_with_matrix(struct wlr_renderer *wlr_renderer,
 	VkCommandBuffer cb = renderer->cb;
 
 	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		renderer->ellipse_pipe);
+		renderer->current_render_buffer->render_setup->ellipse_pipe);
 
 	struct vert_pcr_data  vert_pcr_data;
 	mat3_to_mat4(matrix, vert_pcr_data.mat4);
@@ -898,6 +941,8 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 		return;
 	}
 
+	assert(!renderer->current_render_buffer);
+
 	// stage.cb automatically freed with command pool
 	struct wlr_vk_shared_buffer *buf, *tmp_buf;
 	wl_list_for_each_safe(buf, tmp_buf, &renderer->stage.buffers, link) {
@@ -910,11 +955,16 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 		free(pool);
 	}
 
-	struct wlr_vk_ycbcr_setup *sampler, *tmp_sampler;
-	wl_list_for_each_safe(sampler, tmp_sampler, &renderer->ycbcr_setups, link) {
-		vkDestroySampler(dev->dev, sampler->sampler, NULL);
-		vkDestroySamplerYcbcrConversion(dev->dev, sampler->conversion, NULL);
-		free(sampler);
+	struct wlr_vk_render_format_setup *setup, *tmp_setup;
+	wl_list_for_each_safe(setup, tmp_setup,
+			&renderer->render_format_setups, link) {
+		destroy_render_format_setup(renderer, setup);
+	}
+
+	struct wlr_vk_render_buffer *render_buffer, *render_buffer_tmp;
+	wl_list_for_each_safe(render_buffer, render_buffer_tmp,
+			&renderer->render_buffers, link) {
+		destroy_render_buffer(render_buffer);
 	}
 
 	if (renderer->vert_module) {
@@ -926,15 +976,6 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 	if (renderer->fence) {
 		vkDestroyFence(dev->dev, renderer->fence, NULL);
 	}
-	if (renderer->tex_pipe) {
-		vkDestroyPipeline(dev->dev, renderer->tex_pipe, NULL);
-	}
-	if (renderer->quad_pipe) {
-		vkDestroyPipeline(dev->dev, renderer->quad_pipe, NULL);
-	}
-	if (renderer->ellipse_pipe) {
-		vkDestroyPipeline(dev->dev, renderer->ellipse_pipe, NULL);
-	}
 	if (renderer->pipe_layout) {
 		vkDestroyPipelineLayout(dev->dev, renderer->pipe_layout, NULL);
 	}
@@ -944,9 +985,6 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 	}
 	if (renderer->sampler) {
 		vkDestroySampler(dev->dev, renderer->sampler, NULL);
-	}
-	if (renderer->render_pass) {
-		vkDestroyRenderPass(dev->dev, renderer->render_pass, NULL);
 	}
 	if (renderer->command_pool) {
 		vkDestroyCommandPool(dev->dev, renderer->command_pool, NULL);
@@ -978,6 +1016,15 @@ static bool vulkan_blit_dmabuf(struct wlr_renderer *wlr_renderer,
 	return false;
 }
 
+static bool vulkan_read_pixels(struct wlr_renderer *wlr_renderer,
+		uint32_t drm_format, uint32_t *flags, uint32_t stride,
+		uint32_t width, uint32_t height, uint32_t src_x, uint32_t src_y,
+		uint32_t dst_x, uint32_t dst_y, void *data) {
+	// TODO: implement!
+	wlr_log(WLR_ERROR, "vulkan_read_pixels not implemented");
+	return false;
+}
+
 static int vulkan_get_drm_fd(struct wlr_renderer *wlr_renderer) {
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 	return renderer->dev->drm_fd;
@@ -990,15 +1037,6 @@ static bool vulkan_init_wl_display(struct wlr_renderer *wlr_renderer,
 	}
 
 	return true;
-}
-
-static bool vulkan_read_pixels(struct wlr_renderer *wlr_renderer,
-		uint32_t drm_format, uint32_t *flags, uint32_t stride,
-		uint32_t width, uint32_t height, uint32_t src_x, uint32_t src_y,
-		uint32_t dst_x, uint32_t dst_y, void *data) {
-	// TODO: implement!
-	wlr_log(WLR_ERROR, "vulkan_read_pixels not implemented");
-	return false;
 }
 
 static const struct wlr_renderer_impl renderer_impl = {
@@ -1026,11 +1064,9 @@ static const struct wlr_renderer_impl renderer_impl = {
 	.get_drm_fd = vulkan_get_drm_fd,
 };
 
-// ds_layout, pipe_layout and pipe are out-parameters
-static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
-		VkSampler tex_sampler, VkDescriptorSetLayout *ds_layout,
-		VkPipelineLayout *pipe_layout,
-		VkPipeline *pipe) {
+static bool init_tex_layouts(struct wlr_vk_renderer *renderer,
+		VkSampler tex_sampler, VkDescriptorSetLayout *out_ds_layout,
+		VkPipelineLayout *out_pipe_layout) {
 	VkResult res;
 	VkDevice dev = renderer->dev->dev;
 
@@ -1046,9 +1082,9 @@ static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 	ds_info.bindingCount = 1;
 	ds_info.pBindings = ds_bindings;
 
-	res = vkCreateDescriptorSetLayout(dev, &ds_info, NULL, ds_layout);
+	res = vkCreateDescriptorSetLayout(dev, &ds_info, NULL, out_ds_layout);
 	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create descriptor set layout", res);
+		wlr_vk_error("vkCreateDescriptorSetLayout", res);
 		return false;
 	}
 
@@ -1064,15 +1100,23 @@ static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 	VkPipelineLayoutCreateInfo pl_info = {0};
 	pl_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	pl_info.setLayoutCount = 1;
-	pl_info.pSetLayouts = ds_layout;
+	pl_info.pSetLayouts = out_ds_layout;
 	pl_info.pushConstantRangeCount = 2;
 	pl_info.pPushConstantRanges = pc_ranges;
 
-	res = vkCreatePipelineLayout(dev, &pl_info, NULL, pipe_layout);
+	res = vkCreatePipelineLayout(dev, &pl_info, NULL, out_pipe_layout);
 	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create pipeline layout", res);
+		wlr_vk_error("vkCreatePipelineLayout", res);
 		return false;
 	}
+
+	return true;
+}
+
+static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
+		VkRenderPass rp, VkPipelineLayout pipe_layout, VkPipeline *pipe) {
+	VkResult res;
+	VkDevice dev = renderer->dev->dev;
 
 	// shaders
 	VkPipelineShaderStageCreateInfo vert_stage = {
@@ -1141,8 +1185,8 @@ static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 
 	VkGraphicsPipelineCreateInfo pinfo = {};
 	pinfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	pinfo.layout = *pipe_layout;
-	pinfo.renderPass = renderer->render_pass;
+	pinfo.layout = pipe_layout;
+	pinfo.renderPass = rp;
 	pinfo.subpass = 0;
 	pinfo.stageCount = 2;
 	pinfo.pStages = tex_stages;
@@ -1167,13 +1211,35 @@ static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 	return true;
 }
 
-struct wlr_vk_ycbcr_setup *wlr_vk_find_ycbcr_setup(
-		struct wlr_vk_renderer *renderer, const struct wlr_vk_format_props *fmt,
-		bool create_if_not_found) {
-	struct wlr_vk_ycbcr_setup *setup;
-	wl_list_for_each(setup, &renderer->ycbcr_setups, link) {
-		if (setup->format == fmt->format.vk_format) {
-			return setup;
+struct wlr_vk_ycbcr_sampler *wlr_vk_find_ycbcr_sampler(
+		struct wlr_vk_renderer *renderer, const struct wlr_vk_format *fmt,
+		VkFormatFeatureFlags features, bool create_if_not_found) {
+
+	VkFilter chroma_filter;
+	VkChromaLocation chroma_location;
+
+	// TODO: not sure what to prefer of those two flags
+	if (features & VK_FORMAT_FEATURE_MIDPOINT_CHROMA_SAMPLES_BIT) {
+		chroma_location = VK_CHROMA_LOCATION_MIDPOINT;
+	} else if (features & VK_FORMAT_FEATURE_COSITED_CHROMA_SAMPLES_BIT) {
+		chroma_location = VK_CHROMA_LOCATION_COSITED_EVEN;
+	} else {
+		wlr_log(WLR_ERROR, "Format does support no chroma sampling mode");
+		return NULL;
+	}
+
+	if (features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_LINEAR_FILTER_BIT) {
+		chroma_filter = VK_FILTER_LINEAR;
+	} else {
+		chroma_filter = VK_FILTER_NEAREST;
+	}
+
+	struct wlr_vk_ycbcr_sampler *sampler;
+	wl_list_for_each(sampler, &renderer->ycbcr_samplers, link) {
+		if (sampler->format == fmt->vk_format &&
+				sampler->chroma_filter == chroma_filter &&
+				sampler->chroma_location == chroma_location) {
+			return sampler;
 		}
 	}
 
@@ -1184,21 +1250,27 @@ struct wlr_vk_ycbcr_setup *wlr_vk_find_ycbcr_setup(
 	VkResult res;
 	VkDevice dev = renderer->dev->dev;
 
-	setup = calloc(1, sizeof(*setup));
-	if (!setup) {
+	sampler = calloc(1, sizeof(*sampler));
+	if (!sampler) {
 		wlr_log_errno(WLR_ERROR, "Allocation failed");
 		goto error;
 	}
 
-	VkFormat vk_format = fmt->format.vk_format;
-	setup->format = vk_format;
+	sampler->format = fmt->vk_format;
+	sampler->chroma_filter = chroma_filter;
+	sampler->chroma_location = chroma_location;
 
 	// conversion
 	VkSamplerYcbcrConversionCreateInfo conversioni = {0};
 	conversioni.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO;
-	conversioni.format = vk_format;
-	// TODO: yeah, absolute no idea on those three
-	// explained in more detail in the vulkan spec
+	conversioni.format = sampler->format;
+	conversioni.chromaFilter = chroma_filter;
+	conversioni.xChromaOffset = chroma_location;
+	conversioni.yChromaOffset = chroma_location;
+	// TODO: yeah, absolute no idea on those three.
+	// explained in more detail in the vulkan spec.
+	// maybe the values to use here can be inferred from a future wayland
+	// color space protocol.
 	conversioni.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_601;
 	conversioni.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_FULL;
 	conversioni.forceExplicitReconstruction = false;
@@ -1206,43 +1278,20 @@ struct wlr_vk_ycbcr_setup *wlr_vk_find_ycbcr_setup(
 	conversioni.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
 	conversioni.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
 	conversioni.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-	if (fmt->format.has_alpha) {
+	if (fmt->has_alpha) {
 		conversioni.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
 	} else {
 		conversioni.components.a = VK_COMPONENT_SWIZZLE_ONE;
 	}
 
-	// TODO: really prefer midpoint?
-	// TODO: use format features of a specific format modifier, not just
-	// the general ones. This will potentially end up with multiple
-	// pipelines per format which is terrible
-	if (fmt->features & VK_FORMAT_FEATURE_MIDPOINT_CHROMA_SAMPLES_BIT) {
-		conversioni.xChromaOffset = VK_CHROMA_LOCATION_MIDPOINT;
-		conversioni.yChromaOffset = VK_CHROMA_LOCATION_MIDPOINT;
-	} else if (fmt->features & VK_FORMAT_FEATURE_COSITED_CHROMA_SAMPLES_BIT) {
-		conversioni.xChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
-		conversioni.yChromaOffset = VK_CHROMA_LOCATION_COSITED_EVEN;
-	} else {
-		wlr_log(WLR_ERROR, "Format does support no chroma sampling mode");
-		goto error;
-	}
-
-	VkFormatFeatureFlags linear_bit =
-		VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_LINEAR_FILTER_BIT;
-	if (fmt->features & linear_bit) {
-		conversioni.chromaFilter = VK_FILTER_LINEAR;
-	} else {
-		conversioni.chromaFilter = VK_FILTER_NEAREST;
-	}
-
 	res = vkCreateSamplerYcbcrConversion(dev, &conversioni, NULL,
-		&setup->conversion);
+		&sampler->conversion);
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("vkCreateSamplerYcbcrConversion", res);
 		goto error;
 	}
 
-	wlr_log(WLR_INFO, "created conversion: %p", &setup->conversion);
+	wlr_log(WLR_DEBUG, "created ycbcr conversion: %p", &sampler->conversion);
 
 	// sampler
 	VkSamplerCreateInfo sampleri = {0};
@@ -1260,33 +1309,115 @@ struct wlr_vk_ycbcr_setup *wlr_vk_find_ycbcr_setup(
 
 	VkSamplerYcbcrConversionInfo sampler_conversioni = {0};
 	sampler_conversioni.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-	sampler_conversioni.conversion = setup->conversion;
+	sampler_conversioni.conversion = sampler->conversion;
 	sampleri.pNext = &sampler_conversioni;
 
-	res = vkCreateSampler(dev, &sampleri, NULL, &setup->sampler);
+	res = vkCreateSampler(dev, &sampleri, NULL, &sampler->sampler);
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("Failed to create sampler", res);
 		goto error;
 	}
 
 	// init tex pipeline
-	if (!init_tex_pipeline(renderer, setup->sampler,
-			&setup->ds_layout, &setup->pipe_layout,
-			&setup->tex_pipe)) {
-		goto error;
-	}
-
-	wl_list_insert(&renderer->ycbcr_setups, &setup->link);
-	return setup;
+	wl_list_insert(&renderer->ycbcr_samplers, &sampler->link);
+	return sampler;
 
 error:
-	destroy_ycbcr_setup(renderer, setup);
+	destroy_ycbcr_sampler(renderer, sampler);
 	return NULL;
 }
 
-// returns false on error
 // cleanup is done by destroying the renderer
-static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
+static bool init_static_render_data(struct wlr_vk_renderer *renderer) {
+	VkResult res;
+	VkDevice dev = renderer->dev->dev;
+
+	// default sampler (non ycbcr)
+	VkSamplerCreateInfo sampler_info = {0};
+	sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	sampler_info.magFilter = VK_FILTER_LINEAR;
+	sampler_info.minFilter = VK_FILTER_LINEAR;
+	sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	sampler_info.maxAnisotropy = 1.f;
+	sampler_info.minLod = 0.f;
+	sampler_info.maxLod = 0.25f;
+	sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+
+	res = vkCreateSampler(dev, &sampler_info, NULL, &renderer->sampler);
+	if (res != VK_SUCCESS) {
+		wlr_vk_error("Failed to create sampler", res);
+		return false;
+	}
+
+	if(!init_tex_layouts(renderer, renderer->sampler,
+			&renderer->ds_layout, &renderer->pipe_layout)) {
+		return false;
+	}
+
+	// load vert module and tex frag module since they are needed to
+	// initialize the tex pipeline
+	VkShaderModuleCreateInfo sinfo = {0};
+	sinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	sinfo.codeSize = sizeof(common_vert_data);
+	sinfo.pCode = common_vert_data;
+	res = vkCreateShaderModule(dev, &sinfo, NULL, &renderer->vert_module);
+	if (res != VK_SUCCESS) {
+		wlr_vk_error("Failed to create vertex shader module", res);
+		return false;
+	}
+
+	// tex frag
+	sinfo.codeSize = sizeof(texture_frag_data);
+	sinfo.pCode = texture_frag_data;
+	res = vkCreateShaderModule(dev, &sinfo, NULL, &renderer->tex_frag_module);
+	if (res != VK_SUCCESS) {
+		wlr_vk_error("Failed to create tex fragment shader module", res);
+		return false;
+	}
+
+	// quad frag
+	sinfo.codeSize = sizeof(quad_frag_data);
+	sinfo.pCode = quad_frag_data;
+	res = vkCreateShaderModule(dev, &sinfo, NULL, &renderer->quad_frag_module);
+	if (res != VK_SUCCESS) {
+		wlr_vk_error("Failed to create quad fragment shader module", res);
+		return false;
+	}
+
+	// ellipse frag
+	sinfo.codeSize = sizeof(ellipse_frag_data);
+	sinfo.pCode = ellipse_frag_data;
+	res = vkCreateShaderModule(dev, &sinfo, NULL, &renderer->ellipse_frag_module);
+	if (res != VK_SUCCESS) {
+		wlr_vk_error("Failed to create ellipse fragment shader module", res);
+		return false;
+	}
+
+	return true;
+}
+
+static struct wlr_vk_render_format_setup *find_or_create_render_setup(
+		struct wlr_vk_renderer *renderer, VkFormat format) {
+
+	struct wlr_vk_render_format_setup *setup;
+	wl_list_for_each(setup, &renderer->render_format_setups, link) {
+		if (setup->render_format == format) {
+			return setup;
+		}
+	}
+
+	setup = calloc(1u, sizeof(*setup));
+	if (!setup) {
+		wlr_log(WLR_ERROR, "Allocation failed");
+		return NULL;
+	}
+
+	setup->render_format = format;
+	wl_list_init(&setup->ycbcr_tex_pipes);
+
 	// util
 	VkDevice dev = renderer->dev->dev;
 	VkResult res;
@@ -1344,63 +1475,17 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	rp_info.dependencyCount = 2u;
 	rp_info.pDependencies = deps;
 
-	res = vkCreateRenderPass(dev, &rp_info, NULL, &renderer->render_pass);
+	res = vkCreateRenderPass(dev, &rp_info, NULL, &setup->render_pass);
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("Failed to create render pass", res);
-		return false;
+		free(setup);
+		return NULL;
 	}
 
-	// default sampler (non ycbcr)
-	VkSamplerCreateInfo sampler_info = {0};
-	sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	sampler_info.magFilter = VK_FILTER_LINEAR;
-	sampler_info.minFilter = VK_FILTER_LINEAR;
-	sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-	sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sampler_info.maxAnisotropy = 1.f;
-	sampler_info.minLod = 0.f;
-	sampler_info.maxLod = 0.25f;
-	sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-
-	res = vkCreateSampler(dev, &sampler_info, NULL, &renderer->sampler);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create sampler", res);
-		return false;
+	if (!init_tex_pipeline(renderer, setup->render_pass, renderer->pipe_layout,
+			&setup->tex_pipe)) {
+		goto error;
 	}
-
-	// load vert module and tex frag module since they are needed to
-	// initialize the tex pipeline
-	VkShaderModuleCreateInfo sinfo = {0};
-	sinfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	sinfo.codeSize = sizeof(common_vert_data);
-	sinfo.pCode = common_vert_data;
-	res = vkCreateShaderModule(dev, &sinfo, NULL, &renderer->vert_module);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create vertex shader module", res);
-		return false;
-	}
-
-	// tex frag
-	sinfo.codeSize = sizeof(texture_frag_data);
-	sinfo.pCode = texture_frag_data;
-	res = vkCreateShaderModule(dev, &sinfo, NULL, &renderer->tex_frag_module);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create tex fragment shader module", res);
-		return false;
-	}
-
-	// init default layouts and texture pipeline
-	if (!init_tex_pipeline(renderer, renderer->sampler,
-			&renderer->ds_layout, &renderer->pipe_layout,
-			&renderer->tex_pipe)) {
-		return false;
-	}
-
-	// init other pipelines
-	VkShaderModule quad_frag_module = NULL;
-	VkShaderModule ellipse_frag_module = NULL;
 
 	VkPipelineShaderStageCreateInfo vert_stage = {
 		VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -1408,32 +1493,16 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 		"main", NULL
 	};
 
-	// quad frag
-	sinfo.codeSize = sizeof(quad_frag_data);
-	sinfo.pCode = quad_frag_data;
-	res = vkCreateShaderModule(dev, &sinfo, NULL, &quad_frag_module);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create quad fragment shader module", res);
-		goto cleanup_shaders;
-	}
-
-	// ellipse frag
-	sinfo.codeSize = sizeof(ellipse_frag_data);
-	sinfo.pCode = ellipse_frag_data;
-	res = vkCreateShaderModule(dev, &sinfo, NULL, &ellipse_frag_module);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create ellipse fragment shader module", res);
-		goto cleanup_shaders;
-	}
-
 	VkPipelineShaderStageCreateInfo quad_stages[2] = {vert_stage, {
 		VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-		NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT, quad_frag_module, "main", NULL
+		NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT,
+		renderer->quad_frag_module, "main", NULL
 	}};
 
 	VkPipelineShaderStageCreateInfo ellipse_stages[2] = {vert_stage, {
 		VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-		NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT, ellipse_frag_module, "main", NULL
+		NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT,
+		renderer->ellipse_frag_module, "main", NULL
 	}};
 
 	// info
@@ -1491,7 +1560,7 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	VkGraphicsPipelineCreateInfo pinfos[2] = {0};
 	pinfos[0].sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	pinfos[0].layout = renderer->pipe_layout;
-	pinfos[0].renderPass = renderer->render_pass;
+	pinfos[0].renderPass = setup->render_pass;
 	pinfos[0].subpass = 0;
 	pinfos[0].stageCount = 2;
 	pinfos[0].pStages = ellipse_stages;
@@ -1510,26 +1579,51 @@ static bool init_pipelines(struct wlr_vk_renderer *renderer, VkFormat format) {
 	VkPipeline pipes[2];
 
 	// NOTE: use could use a cache here for faster loading
-	// store it somewhere like $XDG_CACHE_HOME/wlroots/vk_pipe_cache
+	// store it somewhere like $XDG_CACHE_HOME/wlroots/vk_pipe_cache.bin
 	VkPipelineCache cache = VK_NULL_HANDLE;
 	res = vkCreateGraphicsPipelines(dev, cache, 2, pinfos, NULL, pipes);
 	if (res != VK_SUCCESS) {
 		wlr_log(WLR_ERROR, "failed to create vulkan pipelines: %d", res);
-		goto cleanup_shaders;
+		goto error;
 	}
 
-	renderer->ellipse_pipe = pipes[0];
-	renderer->quad_pipe = pipes[1];
-	return true;
+	setup->ellipse_pipe = pipes[0];
+	setup->quad_pipe = pipes[1];
 
-cleanup_shaders:
-	if (quad_frag_module) {
-		vkDestroyShaderModule(dev, quad_frag_module, NULL);
+	wl_list_insert(&renderer->render_format_setups, &setup->link);
+	return setup;
+
+error:
+	destroy_render_format_setup(renderer, setup);
+	return NULL;
+}
+
+static struct wlr_vk_ycbcr_pipeline *find_or_create_ycbcr_pipeline(
+		struct wlr_vk_renderer *renderer,
+		struct wlr_vk_render_format_setup *setup,
+		const struct wlr_vk_ycbcr_sampler *sampler) {
+	struct wlr_vk_ycbcr_pipeline *pipe;
+	wl_list_for_each(pipe, &setup->ycbcr_tex_pipes, link) {
+		if (pipe->sampler == sampler) {
+			return pipe;
+		}
 	}
-	if (ellipse_frag_module) {
-		vkDestroyShaderModule(dev, ellipse_frag_module, NULL);
+
+	pipe = calloc(1u, sizeof(*pipe));
+	if (!setup) {
+		wlr_log(WLR_ERROR, "Allocation failed");
+		return NULL;
 	}
-	return false;
+
+	pipe->sampler = sampler;
+	if (!init_tex_pipeline(renderer, setup->render_pass,
+			sampler->pipe_layout, &pipe->tex_pipe)) {
+		free(pipe);
+		return NULL;
+	}
+
+	wl_list_insert(&setup->ycbcr_tex_pipes, &pipe->link);
+	return pipe;
 }
 
 struct wlr_renderer *wlr_vk_renderer_create_for_device(struct wlr_vk_device *dev) {
@@ -1546,13 +1640,11 @@ struct wlr_renderer *wlr_vk_renderer_create_for_device(struct wlr_vk_device *dev
 	wl_list_init(&renderer->destroy_textures);
 	wl_list_init(&renderer->foreign_textures);
 	wl_list_init(&renderer->descriptor_pools);
-	wl_list_init(&renderer->ycbcr_setups);
+	wl_list_init(&renderer->ycbcr_samplers);
+	wl_list_init(&renderer->render_format_setups);
 	wl_list_init(&renderer->render_buffers);
 
-	// we currently force bgra format on swapchain creation
-	// this could also be deferred until the first render surface is created.
-	// TODO: don't just assume format!
-	if (!init_pipelines(renderer, VK_FORMAT_B8G8R8A8_SRGB)) {
+	if (!init_static_render_data(renderer)) {
 		goto error;
 	}
 

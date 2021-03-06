@@ -315,17 +315,17 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 
 	// get/create ycbcr sampler if needed
 	// conversion info must be added to imageView *and* sampler
-	struct wlr_vk_ycbcr_setup *ycbcr_setup = NULL;
 	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
 	if (fmt->format.ycbcr) {
-		ycbcr_setup = wlr_vk_find_ycbcr_setup(renderer, fmt, true);
-		if (!ycbcr_setup) {
+		texture->ycbcr_sampler = wlr_vk_find_ycbcr_sampler(renderer,
+			&fmt->format, fmt->features, true);
+		if (!texture->ycbcr_sampler) {
 			wlr_vk_error("Could not create ycbcr sampler", res);
 			goto error;
 		}
 
 		conversion_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-		conversion_info.conversion = ycbcr_setup->conversion;
+		conversion_info.conversion = texture->ycbcr_sampler->conversion;
 		view_info.pNext = &conversion_info;
 	}
 
@@ -375,7 +375,6 @@ error:
 	return NULL;
 }
 
-// TODO: respect attribs->flags if possible (fail if not possible)
 VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 		const struct wlr_dmabuf_attributes *attribs,
 		VkDeviceMemory mems[static WLR_DMABUF_MAX_PLANES], uint32_t *n_mems,
@@ -638,6 +637,19 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 		goto error;
 	}
 
+	uint32_t flags = attribs->flags;
+	if (flags & WLR_DMABUF_ATTRIBUTES_FLAGS_Y_INVERT) {
+		texture->invert_y = true;
+		flags &= ~(WLR_DMABUF_ATTRIBUTES_FLAGS_Y_INVERT);
+	}
+
+	if (flags != 0) {
+		wlr_log(WLR_ERROR, "dmabuf flags %x not supported/implemented on vulkan",
+			attribs->flags);
+		// NOTE: should probably make this a critical error in future
+		// return VK_NULL_HANDLE;
+	}
+
 	// view
 	VkImageViewCreateInfo view_info = {0};
 	view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -655,18 +667,21 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 
 	// get/create ycbcr sampler if needed
 	// conversion info must be added to imageView *and* sampler
-	struct wlr_vk_ycbcr_setup *ycbcr_setup = NULL;
 	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
 	if (fmt->format.ycbcr) {
-		ycbcr_setup = wlr_vk_find_ycbcr_setup(renderer, fmt, true);
-		if (!ycbcr_setup) {
+		struct wlr_vk_format_modifier_props *mod =
+			wlr_vk_format_props_find_modifier(fmt, attribs->modifier, false);
+		assert(mod);
+
+		texture->ycbcr_sampler = wlr_vk_find_ycbcr_sampler(renderer,
+			&fmt->format, mod->props.drmFormatModifierTilingFeatures, true);
+		if (!texture->ycbcr_sampler) {
 			wlr_log(WLR_ERROR, "Could not create ycbcr setup");
 			goto error;
 		}
 
-		wlr_log(WLR_INFO, "using conversion: %p", &ycbcr_setup->conversion);
 		conversion_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-		conversion_info.conversion = ycbcr_setup->conversion;
+		conversion_info.conversion = texture->ycbcr_sampler->conversion;
 		view_info.pNext = &conversion_info;
 	}
 
