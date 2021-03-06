@@ -499,6 +499,15 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		dev->extensions[dev->extension_count++] = names[i];
 	}
 
+	// TODO: this extension isn't optional at all, importing dmabufs
+	// isn't well-defined without it. But since the only platform
+	// I could test this on (anv with VK_EXT_image_drm_format_modifier MR)
+	// does not expose it and works fine without it, it's optional for now.
+	const char* name = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
+	if (find_extensions(avail_ext_props, avail_extc, names, nc) != NULL) {
+		dev->extensions[dev->extension_count++] = name;
+	}
+
 	// check/enable features
 	VkPhysicalDeviceFeatures2 features = {0};
 	features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
