@@ -11,7 +11,7 @@
 
 #include <wlr/render/wlr_renderer.h>
 
-struct wlr_renderer *wlr_vk_renderer_create(void);
+struct wlr_renderer *wlr_vk_renderer_create_from_drm_fd(int drm_fd);
 bool wlr_texture_is_vk(struct wlr_texture *texture);
 
 #endif

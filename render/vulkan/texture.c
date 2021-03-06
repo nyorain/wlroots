@@ -495,9 +495,6 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 		plane_layouts[i].size = 0;
 	}
 
-	wlr_log(WLR_INFO, "importing dmabuf image with format %.4s and modifier %lu (%lu)",
-		(const char*) &attribs->format, mod->props.drmFormatModifier, attribs->modifier);
-
 	mod_info.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT;
 	mod_info.drmFormatModifierPlaneCount = plane_count;
 	mod_info.drmFormatModifier = mod->props.drmFormatModifier;
@@ -539,7 +536,7 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 		VkMemoryRequirements2 memr = {0};
 		memr.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
 
-		vkGetImageMemoryRequirements2(dev, &memri, &memr);
+		renderer->dev->api.getImageMemoryRequirements2(dev, &memri, &memr);
 		int mem = wlr_vk_find_mem_type(renderer->dev, 0,
 			memr.memoryRequirements.memoryTypeBits & fdp.memoryTypeBits);
 		if (mem < 0) {
@@ -591,7 +588,7 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 		}
 	}
 
-	res = vkBindImageMemory2(dev, mem_count, bindi);
+	res = renderer->dev->api.bindImageMemory2(dev, mem_count, bindi);
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("vkBindMemory failed", res);
 		goto error_image;

@@ -6,7 +6,7 @@ layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 out_color;
 
 layout(push_constant) uniform UBO {
-	layout(offset = 64) float alpha;
+	layout(offset = 80) float alpha;
 } data;
 
 void main() {
