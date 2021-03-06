@@ -10,9 +10,6 @@
 #include <wlr/render/drm_format_set.h>
 #include <wlr/render/interface.h>
 
-#undef VK_QUEUE_FAMILY_FOREIGN_EXT
-#define VK_QUEUE_FAMILY_FOREIGN_EXT VK_QUEUE_FAMILY_EXTERNAL
-
 struct wlr_vk_descriptor_pool;
 
 // Central vulkan state that should only be needed once per compositor.
@@ -76,7 +73,6 @@ struct wlr_vk_device {
 	struct {
 		bool ycbcr; // Y'CbCr samplers enabled
 	} features;
-
 
 	uint32_t format_prop_count;
 	struct wlr_vk_format_props *format_props;
@@ -250,13 +246,6 @@ struct wlr_vk_renderer {
 
 	struct wl_list render_buffers; // wlr_vk_render_buffer
 
-	// NOTE: not optimal!
-	// we likely just want a single (large, pre-allocated, like 32MB)
-	// buffer. Could grow it at runtime, if needed, but the better way is
-	// probably just to submit pending transfers and block for completion
-	// should it be exceeded.
-	// Then we don't have to track allocations and can use it more like
-	// a ring buffer (or rather scratchpad, as it's reset on each frame/transfer).
 	struct {
 		VkCommandBuffer cb;
 		bool recording;
@@ -269,8 +258,7 @@ struct wlr_renderer *wlr_vk_renderer_create_for_device(struct wlr_vk_device *dev
 
 // stage utility - for uploading/retrieving data
 // Gets an command buffer in recording state which is guaranteed to be
-// executed before the next frame. Call submit_upload_cb to trigger submission
-// manually (costly).
+// executed before the next frame.
 VkCommandBuffer wlr_vk_record_stage_cb(struct wlr_vk_renderer *renderer);
 
 // Submits the current stage command buffer and waits until it has
