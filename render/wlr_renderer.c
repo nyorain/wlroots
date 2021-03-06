@@ -4,7 +4,6 @@
 #include <gbm.h>
 #include <wlr/render/egl.h>
 #include <wlr/render/gles2.h>
-#include <wlr/render/vulkan.h>
 #include <wlr/render/interface.h>
 #include <wlr/render/wlr_renderer.h>
 #include <wlr/types/wlr_matrix.h>
@@ -13,6 +12,10 @@
 #include "render/shm_format.h"
 #include "render/wlr_renderer.h"
 #include "backend/backend.h"
+
+#if WLR_HAS_VULKAN
+	#include <wlr/render/vulkan.h>
+#endif
 
 void wlr_renderer_init(struct wlr_renderer *renderer,
 		const struct wlr_renderer_impl *impl) {
@@ -252,10 +255,7 @@ bool wlr_renderer_init_wl_display(struct wlr_renderer *r,
 	return true;
 }
 
-struct wlr_renderer *wlr_renderer_autocreate_with_drm_fd(int drm_fd) {
-	return wlr_vk_renderer_create_from_drm_fd(drm_fd);
-
-	/*
+static struct wlr_renderer *wlr_renderer_gles2_create_with_drm_fd(int drm_fd) {
 	struct gbm_device *gbm_device = gbm_create_device(drm_fd);
 	if (!gbm_device) {
 		wlr_log(WLR_ERROR, "Failed to create GBM device");
@@ -278,7 +278,27 @@ struct wlr_renderer *wlr_renderer_autocreate_with_drm_fd(int drm_fd) {
 	}
 
 	return renderer;
-	*/
+}
+
+struct wlr_renderer *wlr_renderer_autocreate_with_drm_fd(int drm_fd) {
+	char *name = getenv("WLR_RENDERER");
+	if (name) {
+#if WLR_HAS_VULKAN
+		if (strcmp(name, "vulkan") == 0) {
+			return wlr_vk_renderer_create_from_drm_fd(drm_fd);
+		}
+#endif
+
+		if (strcmp(name, "gles2") == 0) {
+			return wlr_renderer_gles2_create_with_drm_fd(drm_fd);
+		}
+
+		wlr_log(WLR_ERROR, "unrecognized WLR_RENDERER %s", name);
+		return NULL;
+	}
+
+	// default: create egl/gles2 renderer
+	return wlr_renderer_gles2_create_with_drm_fd(drm_fd);
 }
 
 struct wlr_renderer *wlr_renderer_autocreate(struct wlr_backend *backend) {

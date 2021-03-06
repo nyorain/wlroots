@@ -10,6 +10,8 @@
 
 #mesondefine WLR_HAS_XWAYLAND
 
+#mesondefine WLR_HAS_VULKAN
+
 #mesondefine WLR_HAS_XCB_ERRORS
 #mesondefine WLR_HAS_XCB_ICCCM
 
