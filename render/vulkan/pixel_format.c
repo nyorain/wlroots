@@ -242,13 +242,6 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 	struct wlr_vk_format_props props = {0};
 	props.format = *format;
 
-	// NOTE: vulkan gets a bit messy here. We need these features when
-	// creating a ycbcr feature - even for dmabuff imported features (even
-	// though they don't have optimal tiling mode). See the chapter
-	// of "potential format features" in vulkan (42.2.1 at the time of writing),
-	// we might be able to improve this.
-	props.features = fmtp.formatProperties.optimalTilingFeatures;
-
 	if (modp.drmFormatModifierCount > 0) {
 		if (fmtp.formatProperties.optimalTilingFeatures & render_features) {
 			props.render_mods = calloc(modp.drmFormatModifierCount,
@@ -399,6 +392,7 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 			VkExtent3D me = ifmtp.imageFormatProperties.maxExtent;
 			props.max_extent.width = me.width;
 			props.max_extent.height = me.height;
+			props.features = fmtp.formatProperties.optimalTilingFeatures;
 
 			wlr_log(WLR_INFO, "vulkan: Format %.4s (0x%" PRIx32 "), "
 				"supported for textures",
