@@ -22,6 +22,10 @@
 #include "render/pixel_format.h"
 #include "render/wlr_renderer.h"
 
+#if WLR_HAS_VULKAN
+	#include <wlr/render/vulkan.h>
+#endif
+
 void wlr_renderer_init(struct wlr_renderer *renderer,
 		const struct wlr_renderer_impl *impl) {
 	assert(impl->begin);
