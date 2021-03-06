@@ -30,6 +30,13 @@ struct wlr_vk_renderer *vulkan_get_renderer(struct wlr_renderer *wlr_renderer) {
 	return (struct wlr_vk_renderer *)wlr_renderer;
 }
 
+// vertex shader push constant range data
+struct vert_pcr_data {
+	float mat4[4][4];
+	float uv_off[2];
+	float uv_size[2];
+};
+
 // renderer
 // util
 static void mat3_to_mat4(const float mat3[9], float mat4[4][4]) {
@@ -487,7 +494,6 @@ static bool vulkan_bind_buffer(struct wlr_renderer *wlr_renderer,
 	}
 
 	if (!wlr_buffer) {
-		renderer->current_render_buffer = NULL;
 		return true;
 	}
 
@@ -708,8 +714,6 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_renderer,
 		struct wlr_texture *wlr_texture, const struct wlr_fbox *box,
 		const float matrix[9], float alpha) {
-	// TODO: respect box, probably best to pass it via pcr
-
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 	assert(renderer->cb && renderer->recording_cb);
 	VkCommandBuffer cb = renderer->cb;
@@ -731,11 +735,10 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 	// created for in on creation. Vulkan basically requires special pipelines
 	// for rendering ycbcr textures
 	if (texture->format->ycbcr) {
-		// TODO: hack
-		struct wlr_vk_format_props fmt;
-		fmt.format = *texture->format;
+		const struct wlr_vk_format_props *fmt = wlr_vk_format_from_drm(
+			renderer->dev, texture->format->drm_format);
 		struct wlr_vk_ycbcr_setup *setup = wlr_vk_find_ycbcr_setup(
-			renderer, &fmt, false);
+			renderer, fmt, false);
 		if (!setup) {
 			wlr_log(WLR_ERROR, "Trying to render texture with ycbcr format "
 				"for which no pipeline was created");
@@ -753,12 +756,17 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 			renderer->pipe_layout, 0, 1, &texture->ds, 0, NULL);
 	}
 
-	float mat4[4][4] = {0};
-	mat3_to_mat4(matrix, mat4);
+	struct vert_pcr_data  vert_pcr_data;
+	mat3_to_mat4(matrix, vert_pcr_data.mat4);
+	vert_pcr_data.uv_off[0] = box->x / wlr_texture->width;
+	vert_pcr_data.uv_off[1] = box->y / wlr_texture->height;
+	vert_pcr_data.uv_size[0] = box->width / wlr_texture->width;
+	vert_pcr_data.uv_size[1] = box->height / wlr_texture->height;
+
 	vkCmdPushConstants(cb, renderer->pipe_layout,
-		VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, mat4);
+		VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(vert_pcr_data), &vert_pcr_data);
 	vkCmdPushConstants(cb, renderer->pipe_layout,
-		VK_SHADER_STAGE_FRAGMENT_BIT, 16 * sizeof(float), sizeof(float),
+		VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(vert_pcr_data), sizeof(float),
 		&alpha);
 	vkCmdDraw(cb, 4, 1, 0, 0);
 	texture->last_used = renderer->frame;
@@ -783,7 +791,6 @@ static void vulkan_clear(struct wlr_renderer *wlr_renderer,
 	att.clearValue.color.float32[1] = pow(color[1], 2.2);
 	att.clearValue.color.float32[2] = pow(color[2], 2.2);
 	att.clearValue.color.float32[3] = pow(color[3], 2.2);
-	// memcpy(&att.clearValue.color.float32, color, 4 * sizeof(float));
 
 	VkClearRect rect = {0};
 	rect.rect = renderer->scissor;
@@ -825,12 +832,17 @@ static void vulkan_render_quad_with_matrix(struct wlr_renderer *wlr_renderer,
 	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		renderer->quad_pipe);
 
-	float mat4[4][4] = {0};
-	mat3_to_mat4(matrix, mat4);
+	struct vert_pcr_data  vert_pcr_data;
+	mat3_to_mat4(matrix, vert_pcr_data.mat4);
+	vert_pcr_data.uv_off[0] = 0.f;
+	vert_pcr_data.uv_off[1] = 0.f;
+	vert_pcr_data.uv_size[0] = 1.f;
+	vert_pcr_data.uv_size[1] = 1.f;
+
 	vkCmdPushConstants(cb, renderer->pipe_layout,
-		VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, mat4);
+		VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(vert_pcr_data), &vert_pcr_data);
 	vkCmdPushConstants(cb, renderer->pipe_layout,
-		VK_SHADER_STAGE_FRAGMENT_BIT, 16 * sizeof(float), sizeof(float) * 4,
+		VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(vert_pcr_data), sizeof(float) * 4,
 		color);
 	vkCmdDraw(cb, 4, 1, 0, 0);
 }
@@ -844,12 +856,17 @@ static void vulkan_render_ellipse_with_matrix(struct wlr_renderer *wlr_renderer,
 	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		renderer->ellipse_pipe);
 
-	float mat4[4][4] = {0};
-	mat3_to_mat4(matrix, mat4);
+	struct vert_pcr_data  vert_pcr_data;
+	mat3_to_mat4(matrix, vert_pcr_data.mat4);
+	vert_pcr_data.uv_off[0] = 0.f;
+	vert_pcr_data.uv_off[1] = 0.f;
+	vert_pcr_data.uv_size[0] = 1.f;
+	vert_pcr_data.uv_size[1] = 1.f;
+
 	vkCmdPushConstants(cb, renderer->pipe_layout,
-		VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, mat4);
+		VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(vert_pcr_data), &vert_pcr_data);
 	vkCmdPushConstants(cb, renderer->pipe_layout,
-		VK_SHADER_STAGE_FRAGMENT_BIT, 16 * sizeof(float), sizeof(float) * 4,
+		VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(vert_pcr_data), sizeof(float) * 4,
 		color);
 	vkCmdDraw(cb, 4, 1, 0, 0);
 }
@@ -868,7 +885,7 @@ static const struct wlr_drm_format_set *vulkan_get_dmabuf_render_formats(
 
 static uint32_t vulkan_preferred_read_format(
 		struct wlr_renderer *wlr_renderer) {
-	// TODO
+	// TODO: implement!
 	wlr_log(WLR_ERROR, "vulkan_preferred_read_format not implemented");
 	return DRM_FORMAT_XBGR8888;
 }
@@ -946,23 +963,42 @@ static bool vulkan_blit_dmabuf(struct wlr_renderer *wlr_renderer,
 		struct wlr_dmabuf_attributes *src_attr) {
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 	(void) renderer;
-	// TODO: implement
+	wlr_log(WLR_ERROR, "vulkan_blit_dmabuf not implemented");
+	// TODO: implement!
+	// 1: import src_attr (image usage transfer_src, check format support blit_src)
+	// 2: import dst_attr (image usage transfer_dst, check format support transfer_src)
+	// 3: record cb with vkCmdBlit
+	// 4: submit cb
+	// 5: wait for associated fence :(
+	// - should probably keep a list of already imported dmabufs,
+	//   importing is a heavy operation. Not sure how to best do this,
+	//   the only user of this is wlr_screencopy_v1 which always passes
+	//   something we have previously imported as renderbuffer in src_attr
+	//   and always the same buffer in dst_attr.
 	return false;
 }
 
 static int vulkan_get_drm_fd(struct wlr_renderer *wlr_renderer) {
-	// TODO: implement
-	return -1;
+	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
+	return renderer->dev->drm_fd;
 }
 
 static bool vulkan_init_wl_display(struct wlr_renderer *wlr_renderer,
 		struct wl_display *wl_display) {
-	// struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 	if (!wlr_linux_dmabuf_v1_create(wl_display, wlr_renderer)) {
 		return false;
 	}
 
 	return true;
+}
+
+static bool vulkan_read_pixels(struct wlr_renderer *wlr_renderer,
+		uint32_t drm_format, uint32_t *flags, uint32_t stride,
+		uint32_t width, uint32_t height, uint32_t src_x, uint32_t src_y,
+		uint32_t dst_x, uint32_t dst_y, void *data) {
+	// TODO: implement!
+	wlr_log(WLR_ERROR, "vulkan_read_pixels not implemented");
+	return false;
 }
 
 static const struct wlr_renderer_impl renderer_impl = {
@@ -980,7 +1016,7 @@ static const struct wlr_renderer_impl renderer_impl = {
 	.get_dmabuf_texture_formats = vulkan_get_dmabuf_texture_formats,
 	.get_dmabuf_render_formats = vulkan_get_dmabuf_render_formats,
 	.preferred_read_format = vulkan_preferred_read_format,
-	.read_pixels = NULL, // TODO
+	.read_pixels = vulkan_read_pixels,
 	.texture_from_pixels = vulkan_texture_from_pixels,
 	.texture_from_wl_drm = NULL,
 	.texture_from_dmabuf = vulkan_texture_from_dmabuf,
@@ -1018,10 +1054,10 @@ static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 
 	// pipeline layout
 	VkPushConstantRange pc_ranges[2] = {0};
-	pc_ranges[0].size = sizeof(float) * 16; // mat4, see texture.vert
+	pc_ranges[0].size = sizeof(struct vert_pcr_data);
 	pc_ranges[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
-	pc_ranges[1].offset = sizeof(float) * 16;
+	pc_ranges[1].offset = pc_ranges[0].size;
 	pc_ranges[1].size = sizeof(float) * 4; // alpha or color
 	pc_ranges[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
@@ -1177,10 +1213,9 @@ struct wlr_vk_ycbcr_setup *wlr_vk_find_ycbcr_setup(
 	}
 
 	// TODO: really prefer midpoint?
-	// NOTE: fmt->features are the features for optimal tiling. We might
-	// have a dmabuf-imported image for which we create/use the setup.
-	// We can't properly account for that though, see the vulkan chapter
-	// on "potential format features" (42.2.1 at the time of writing).
+	// TODO: use format features of a specific format modifier, not just
+	// the general ones. This will potentially end up with multiple
+	// pipelines per format which is terrible
 	if (fmt->features & VK_FORMAT_FEATURE_MIDPOINT_CHROMA_SAMPLES_BIT) {
 		conversioni.xChromaOffset = VK_CHROMA_LOCATION_MIDPOINT;
 		conversioni.yChromaOffset = VK_CHROMA_LOCATION_MIDPOINT;
@@ -1516,6 +1551,7 @@ struct wlr_renderer *wlr_vk_renderer_create_for_device(struct wlr_vk_device *dev
 
 	// we currently force bgra format on swapchain creation
 	// this could also be deferred until the first render surface is created.
+	// TODO: don't just assume format!
 	if (!init_pipelines(renderer, VK_FORMAT_B8G8R8A8_SRGB)) {
 		goto error;
 	}
@@ -1572,7 +1608,7 @@ error:
 	return NULL;
 }
 
-struct wlr_renderer *wlr_vk_renderer_create(void) {
+struct wlr_renderer *wlr_vk_renderer_create_from_drm_fd(int drm_fd) {
 	VkResult res;
 	wlr_log(WLR_INFO, "The vulkan renderer is only experimental and "
 		"not expected to be ready for daily use");
@@ -1587,26 +1623,21 @@ struct wlr_renderer *wlr_vk_renderer_create(void) {
 		return NULL;
 	}
 
-	// TODO: don't just choose the first device
-	// query one based on
-	//  - user preference (env variables/config)
-	//  - supported presenting caps (present qfam found?)
-	//  - supported extensions, external memory import properties
-	//  - (as default, without user preference) integrated vs dedicated
-	//  - extensions to match it with drm/backend fd
-	uint32_t num_devs = 3;
-	VkPhysicalDevice phdevs[3];
-	res = vkEnumeratePhysicalDevices(ini->instance, &num_devs,
-		phdevs);
-	if ((res != VK_SUCCESS && res != VK_INCOMPLETE) || num_devs < 1) {
-		wlr_log(WLR_ERROR, "Could not retrieve physical device");
-		free(ini);
-		return NULL;
+	VkPhysicalDevice phdev = wlr_vk_find_drm_phdev(ini, drm_fd);
+	if (!phdev) {
+		// NOTE: could simply fail renderer creation here (especially
+		// when there is more than one vulkan device, this will very likely
+		// fail).
+		wlr_log(WLR_ERROR, "Could not match drm and vulkan device, just "
+			"trying to use the first available vulkan device");
+		uint32_t num_devs = 1;
+		res = vkEnumeratePhysicalDevices(ini->instance, &num_devs, &phdev);
+		if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
+			wlr_log(WLR_ERROR, "Could not retrieve physical device");
+			free(ini);
+			return NULL;
+		}
 	}
-
-	// TODO: temp to force intel gpu on my device.
-	// must be removed
-	VkPhysicalDevice phdev = phdevs[0];
 
 	// queue families
 	uint32_t qfam_count;
@@ -1622,5 +1653,6 @@ struct wlr_renderer *wlr_vk_renderer_create(void) {
 		return NULL;
 	}
 
+	dev->drm_fd = drm_fd;
 	return wlr_vk_renderer_create_for_device(dev);
 }

@@ -28,6 +28,11 @@ struct wlr_vk_instance {
 	struct {
 		PFN_vkCreateDebugUtilsMessengerEXT createDebugUtilsMessengerEXT;
 		PFN_vkDestroyDebugUtilsMessengerEXT destroyDebugUtilsMessengerEXT;
+
+		PFN_vkGetPhysicalDeviceProperties2 getPhysicalDeviceProperties2;
+		PFN_vkGetPhysicalDeviceFeatures2 getPhysicalDeviceFeatures2;
+		PFN_vkGetPhysicalDeviceFormatProperties2 getPhysicalDeviceFormatProperties2;
+		PFN_vkGetPhysicalDeviceImageFormatProperties2 getPhysicalDeviceImageFormatProperties2;
 	} api;
 };
 
@@ -51,6 +56,8 @@ struct wlr_vk_device {
 	VkPhysicalDevice phdev;
 	VkDevice dev;
 
+	int drm_fd; // not owned
+
 	// list of enabled extensions
 	unsigned extension_count;
 	const char **extensions;
@@ -61,6 +68,9 @@ struct wlr_vk_device {
 
 	struct {
 		PFN_vkGetMemoryFdPropertiesKHR getMemoryFdPropertiesKHR;
+
+		PFN_vkBindImageMemory2 bindImageMemory2;
+		PFN_vkGetImageMemoryRequirements2 getImageMemoryRequirements2;
 	} api;
 
 	struct {
@@ -78,6 +88,10 @@ struct wlr_vk_device {
 	uint32_t shm_format_count;
 	uint32_t *shm_formats; // to implement vulkan_get_shm_texture_formats
 };
+
+// Tries to find the VkPhysicalDevice for the given drm fd.
+// Might find none and return VK_NULL_HANDLE.
+VkPhysicalDevice wlr_vk_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd);
 
 // Creates a device for the given instance and physical device.
 // Will try to enable the given extensions but not fail if they are not

@@ -16,7 +16,7 @@
 
 #if WLR_HAS_VULKAN_RENDERER
 #include <wlr/render/vulkan.h>
-#endif WLR_HAS_VULKAN_RENDERER
+#endif // WLR_HAS_VULKAN_RENDERER
 
 #include "util/signal.h"
 #include "render/pixel_format.h"
