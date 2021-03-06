@@ -218,7 +218,8 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 	modp.sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT;
 	fmtp.pNext = &modp;
 
-	vkGetPhysicalDeviceFormatProperties2(dev->phdev, format->vk_format, &fmtp);
+	dev->instance->api.getPhysicalDeviceFormatProperties2(dev->phdev,
+		format->vk_format, &fmtp);
 
 	// detailed check
 	VkPhysicalDeviceImageFormatInfo2 fmti = {0};
@@ -277,7 +278,8 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 			return;
 		}
 
-		vkGetPhysicalDeviceFormatProperties2(dev->phdev, format->vk_format, &fmtp);
+		dev->instance->api.getPhysicalDeviceFormatProperties2(dev->phdev,
+			format->vk_format, &fmtp);
 
 		// detailed check
 		// format info
@@ -291,6 +293,7 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 
 		// format properties
 		ifmtp.pNext = &efmtp;
+		const VkExternalMemoryProperties* emp = &efmtp.externalMemoryProperties;
 
 		for (unsigned i = 0u; i < modp.drmFormatModifierCount; ++i) {
 			VkDrmFormatModifierPropertiesEXT m =
@@ -301,14 +304,17 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 				fmti.usage = render_usage;
 
 				modi.drmFormatModifier = m.drmFormatModifier;
-				res = vkGetPhysicalDeviceImageFormatProperties2(dev->phdev,
-					&fmti, &ifmtp);
+				res = dev->instance->api.getPhysicalDeviceImageFormatProperties2(
+					dev->phdev, &fmti, &ifmtp);
 				if (res != VK_SUCCESS) {
 					if (res != VK_ERROR_FORMAT_NOT_SUPPORTED) {
 						wlr_vk_error("vkGetPhysicalDeviceImageFormatProperties2",
 							res);
 					}
-				} else {
+				} else if ((emp->externalMemoryFeatures &
+							VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) &&
+						(emp->compatibleHandleTypes &
+						 	VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT)) {
 					unsigned c = props.render_mod_count;
 					VkExtent3D me = ifmtp.imageFormatProperties.maxExtent;
 					VkExternalMemoryProperties emp = efmtp.externalMemoryProperties;
@@ -325,8 +331,9 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 					wlr_drm_format_set_add(&dev->dmabuf_render_formats,
 						format->drm_format, m.drmFormatModifier);
 
-					wlr_log(WLR_INFO, "vulkan: Format %" PRIu32 ", mod %"PRIu64
-						" supported for rendering", format->drm_format,
+					wlr_log(WLR_INFO, "vulkan: Format %.4s (0x%" PRIx32 "), "
+						"mod 0x%"PRIx64" supported for render buffer importing",
+						(const char*) &format->drm_format, format->drm_format,
 						m.drmFormatModifier);
 				}
 			}
@@ -336,14 +343,17 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 				fmti.usage = dma_tex_usage;
 
 				modi.drmFormatModifier = m.drmFormatModifier;
-				res = vkGetPhysicalDeviceImageFormatProperties2(dev->phdev,
-					&fmti, &ifmtp);
+				res = dev->instance->api.getPhysicalDeviceImageFormatProperties2(
+					dev->phdev, &fmti, &ifmtp);
 				if (res != VK_SUCCESS) {
 					if (res != VK_ERROR_FORMAT_NOT_SUPPORTED) {
 						wlr_vk_error("vkGetPhysicalDeviceImageFormatProperties2",
 							res);
 					}
-				} else {
+				} else if ((emp->externalMemoryFeatures &
+							VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) &&
+						(emp->compatibleHandleTypes &
+						 	VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT)) {
 					unsigned c = props.texture_mod_count;
 					VkExtent3D me = ifmtp.imageFormatProperties.maxExtent;
 					VkExternalMemoryProperties emp = efmtp.externalMemoryProperties;
@@ -360,8 +370,9 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 					wlr_drm_format_set_add(&dev->dmabuf_texture_formats,
 						format->drm_format, m.drmFormatModifier);
 
-					wlr_log(WLR_INFO, "vulkan: Format %" PRIu32 ", mod %"PRIu64
-						" supported for texture", format->drm_format,
+					wlr_log(WLR_INFO, "vulkan: Format %.4s (0x%" PRIx32 "), "
+						"mod 0x%"PRIx64" supported for texture importing",
+						(const char*) &format->drm_format, format->drm_format,
 						m.drmFormatModifier);
 				}
 			}
@@ -377,8 +388,8 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 		fmti.tiling = VK_IMAGE_TILING_OPTIMAL;
 		fmti.usage = tex_usage;
 
-		res = vkGetPhysicalDeviceImageFormatProperties2(dev->phdev,
-			&fmti, &ifmtp);
+		res = dev->instance->api.getPhysicalDeviceImageFormatProperties2(
+			dev->phdev, &fmti, &ifmtp);
 		if (res != VK_SUCCESS) {
 			if (res != VK_ERROR_FORMAT_NOT_SUPPORTED) {
 				wlr_vk_error("vkGetPhysicalDeviceImageFormatProperties2",
@@ -389,7 +400,10 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 			props.max_extent.width = me.width;
 			props.max_extent.height = me.height;
 
-			wlr_log(WLR_INFO, "vulkan: Format %" PRIu32 " supported for textures", format->drm_format);
+			wlr_log(WLR_INFO, "vulkan: Format %.4s (0x%" PRIx32 "), "
+				"supported for textures",
+				(const char*) &format->drm_format, format->drm_format);
+
 			dev->shm_formats[dev->shm_format_count] = format->drm_format;
 			++dev->shm_format_count;
 

@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <assert.h>
+#include <xf86drm.h>
 #include <render/vulkan.h>
 #include <wlr/util/log.h>
 #include <wlr/version.h>
@@ -37,22 +38,10 @@ static VkBool32 debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 	((void) data);
 
 	// we ignore some of the non-helpful warnings
-	/*
 	static const char *const ignored[] = {
-		// TODO: any of these needed?
-
-		// if clear is used before any other command
-		// "UNASSIGNED-CoreValidation-DrawState-ClearCmdBeforeDraw",
 		// notifies us that shader output is not consumed since
 		// we use the shared vertex buffer with uv output
-		// "UNASSIGNED-CoreValidation-Shader-OutputNotConsumed",
-		// always warns for queue_external/foreign transitions
-		// fixed in https://github.com/KhronosGroup/Vulkan-ValidationLayers/pull/311,
-		// no release with that in
-		// "UNASSIGNED-VkImageMemoryBarrier-image-00004",
-		// pretty sure this is a bug, nagging us about external image
-		// realease/acquire. TODO: investigate/report upstream
-		// "UNASSIGNED-VkImageMemoryBarrier-image-00003",
+		"UNASSIGNED-CoreValidation-Shader-OutputNotConsumed",
 	};
 
 	if (debug_data->pMessageIdName) {
@@ -62,7 +51,6 @@ static VkBool32 debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 			}
 		}
 	}
-	*/
 
 	enum wlr_log_importance importance;
 	switch(severity) {
@@ -99,6 +87,22 @@ static VkBool32 debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 struct wlr_vk_instance *wlr_vk_instance_create(
 		unsigned ext_count, const char **exts, bool debug,
 		const char *compositor_name, unsigned compositor_version) {
+
+	// we require vulkan 1.1
+	PFN_vkEnumerateInstanceVersion pfEnumInstanceVersion =
+		(PFN_vkEnumerateInstanceVersion)
+		vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceVersion");
+	if (!pfEnumInstanceVersion) {
+		wlr_log(WLR_ERROR, "wlroots requires vulkan 1.1 which is not available");
+		return NULL;
+	}
+
+	uint32_t ini_version;
+	if (pfEnumInstanceVersion(&ini_version) != VK_SUCCESS ||
+			ini_version < VK_API_VERSION_1_1) {
+		wlr_log(WLR_ERROR, "wlroots requires vulkan 1.1 which is not available");
+		return NULL;
+	}
 
 	// query extension support
 	uint32_t avail_extc = 0;
@@ -161,7 +165,7 @@ struct wlr_vk_instance *wlr_vk_instance_create(
 	application_info.applicationVersion = compositor_version;
 	application_info.pEngineName = "wlroots";
 	application_info.engineVersion = WLR_VERSION_NUM;
-	application_info.apiVersion = VK_API_VERSION_1_2;
+	application_info.apiVersion = VK_API_VERSION_1_1;
 
 	// standard_validation: reports error in api usage to debug callback
 	// renderdoc: allows to capture (and debug) frames with renderdoc
@@ -213,14 +217,35 @@ struct wlr_vk_instance *wlr_vk_instance_create(
 		goto error;
 	}
 
+	ini->api.getPhysicalDeviceFeatures2 =
+		(PFN_vkGetPhysicalDeviceFeatures2) vkGetInstanceProcAddr(
+				ini->instance, "vkGetPhysicalDeviceFeatures2");
+	ini->api.getPhysicalDeviceProperties2 =
+		(PFN_vkGetPhysicalDeviceProperties2) vkGetInstanceProcAddr(
+				ini->instance, "vkGetPhysicalDeviceProperties2");
+	ini->api.getPhysicalDeviceFormatProperties2 =
+		(PFN_vkGetPhysicalDeviceFormatProperties2) vkGetInstanceProcAddr(
+				ini->instance, "vkGetPhysicalDeviceFormatProperties2");
+	ini->api.getPhysicalDeviceImageFormatProperties2 =
+		(PFN_vkGetPhysicalDeviceImageFormatProperties2) vkGetInstanceProcAddr(
+				ini->instance, "vkGetPhysicalDeviceImageFormatProperties2");
+
+	if (!ini->api.getPhysicalDeviceFeatures2 ||
+			!ini->api.getPhysicalDeviceProperties2 ||
+			!ini->api.getPhysicalDeviceFormatProperties2 ||
+			!ini->api.getPhysicalDeviceImageFormatProperties2) {
+		wlr_log(WLR_ERROR, "Could not load required vulkan 1.1 API");
+		goto error;
+	}
+
 	// debug callback
 	if (debug_utils_found) {
 		ini->api.createDebugUtilsMessengerEXT =
 			(PFN_vkCreateDebugUtilsMessengerEXT) vkGetInstanceProcAddr(
-					ini->instance, "vkCreateDebugUtilsMessengerEXT");
+				ini->instance, "vkCreateDebugUtilsMessengerEXT");
 		ini->api.destroyDebugUtilsMessengerEXT =
 			(PFN_vkDestroyDebugUtilsMessengerEXT) vkGetInstanceProcAddr(
-					ini->instance, "vkDestroyDebugUtilsMessengerEXT");
+				ini->instance, "vkDestroyDebugUtilsMessengerEXT");
 
 		if (ini->api.createDebugUtilsMessengerEXT) {
 			ini->api.createDebugUtilsMessengerEXT(ini->instance,
@@ -253,6 +278,147 @@ void wlr_vk_instance_destroy(struct wlr_vk_instance *ini) {
 
 	free(ini->extensions);
 	free(ini);
+}
+
+// physical device matching
+static void log_phdev(const VkPhysicalDeviceProperties *props) {
+	uint32_t vv_major = (props->apiVersion >> 22);
+	uint32_t vv_minor = (props->apiVersion >> 12) & 0x3ff;
+	uint32_t vv_patch = (props->apiVersion) & 0xfff;
+
+	uint32_t dv_major = (props->driverVersion >> 22);
+	uint32_t dv_minor = (props->driverVersion >> 12) & 0x3ff;
+	uint32_t dv_patch = (props->driverVersion) & 0xfff;
+
+	const char* dev_type = "unknown";
+	switch(props->deviceType) {
+		case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+			dev_type = "integrated";
+			break;
+		case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+			dev_type = "discrete";
+			break;
+		case VK_PHYSICAL_DEVICE_TYPE_CPU:
+			dev_type = "cpu";
+			break;
+		case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+			dev_type = "gpu";
+			break;
+		default:
+			break;
+	}
+
+	wlr_log(WLR_INFO, "Vulkan device: '%s'", props->deviceName);
+	wlr_log(WLR_INFO, "  Device type: '%s'", dev_type);
+	wlr_log(WLR_INFO, "  Supported API version: %u.%u.%u", vv_major, vv_minor, vv_patch);
+	wlr_log(WLR_INFO, "  Driver version: %u.%u.%u", dv_major, dv_minor, dv_patch);
+}
+
+VkPhysicalDevice wlr_vk_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd) {
+	VkResult res;
+	uint32_t num_phdevs;
+
+	res = vkEnumeratePhysicalDevices(ini->instance, &num_phdevs, NULL);
+	if (res != VK_SUCCESS) {
+		wlr_log(WLR_ERROR, "Could not retrieve physical devices");
+		return VK_NULL_HANDLE;
+	}
+
+	VkPhysicalDevice phdevs[1 + num_phdevs];
+	res = vkEnumeratePhysicalDevices(ini->instance, &num_phdevs, phdevs);
+	if (res != VK_SUCCESS) {
+		wlr_log(WLR_ERROR, "Could not retrieve physical devices");
+		return VK_NULL_HANDLE;
+	}
+
+	// TODO: use VK_EXT_physical_device_drm when available as it allows
+	// us to match non-pci gpus.
+	// See https://github.com/KhronosGroup/Vulkan-Docs/pull/1356
+	// We still might want to fall back to the PCI extension if the
+	// other one is not available.
+
+	drmDevicePtr dev_ptr;
+	if (drmGetDevice(drm_fd, &dev_ptr) != 0) {
+		wlr_log_errno(WLR_ERROR, "drmGetDevice failed");
+		return VK_NULL_HANDLE;
+	}
+
+	if (dev_ptr->bustype != DRM_BUS_PCI) {
+		wlr_log(WLR_ERROR, "Can't match vulkan and non-PCI drm device");
+		drmFreeDevice(&dev_ptr);
+		return VK_NULL_HANDLE;
+	}
+
+	drmPciBusInfo drm_pci_info = *dev_ptr->businfo.pci;
+
+	drmFreeDevice(&dev_ptr);
+
+	for (unsigned i = 0u; i < num_phdevs; ++i) {
+		VkPhysicalDevice phdev = phdevs[i];
+
+		// check whether device supports vulkan 1.1, needed for
+		// vkGetPhysicalDeviceProperties2
+		VkPhysicalDeviceProperties phdev_props;
+		vkGetPhysicalDeviceProperties(phdev, &phdev_props);
+
+		log_phdev(&phdev_props);
+
+		if (phdev_props.apiVersion < VK_API_VERSION_1_1) {
+			// NOTE: we could additionaly check whether the
+			// VkPhysicalDeviceProperties2KHR extension is supported but
+			// implementations not supporting 1.1 are unlikely in future
+			continue;
+		}
+
+		// check for extensions
+		uint32_t avail_extc = 0;
+		res = vkEnumerateDeviceExtensionProperties(phdev, NULL,
+			&avail_extc, NULL);
+		if ((res != VK_SUCCESS) || (avail_extc == 0)) {
+			wlr_vk_error("  Could not enumerate device extensions", res);
+			continue;
+		}
+
+		VkExtensionProperties avail_ext_props[avail_extc + 1];
+		res = vkEnumerateDeviceExtensionProperties(phdev, NULL,
+			&avail_extc, avail_ext_props);
+		if (res != VK_SUCCESS) {
+			wlr_vk_error("  Could not enumerate device extensions", res);
+			continue;
+		}
+
+		const char* name = VK_EXT_PCI_BUS_INFO_EXTENSION_NAME;
+
+		if (find_extensions(avail_ext_props, avail_extc, &name, 1) != NULL) {
+			wlr_log(WLR_INFO, "  Can't check pci info of device, "
+				"as it does not support the PCI_BUS_INFO extensions");
+			continue;
+		}
+
+		VkPhysicalDevicePCIBusInfoPropertiesEXT bus_info = {0};
+		bus_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT;
+
+		VkPhysicalDeviceProperties2 props = {0};
+		props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+
+		props.pNext = &bus_info;
+
+		ini->api.getPhysicalDeviceProperties2(phdev, &props);
+
+		wlr_log(WLR_INFO, "  PCI bus: %04x:%02x:%02x.%x", bus_info.pciDomain,
+			bus_info.pciBus, bus_info.pciDevice, bus_info.pciFunction);
+
+		if (bus_info.pciDevice == drm_pci_info.dev &&
+				bus_info.pciBus == drm_pci_info.bus &&
+				bus_info.pciDomain == drm_pci_info.domain &&
+				bus_info.pciFunction == drm_pci_info.func) {
+			wlr_log(WLR_INFO, "Found matching vulkan device from drm pci info: %s",
+				phdev_props.deviceName);
+			return phdev;
+		}
+	}
+
+	return VK_NULL_HANDLE;
 }
 
 // device
@@ -291,7 +457,8 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 
 	dev->phdev = phdev;
 	dev->instance = ini;
-	dev->extensions = calloc(7 + ext_count, sizeof(*ini->extensions));
+	dev->drm_fd = -1;
+	dev->extensions = calloc(16 + ext_count, sizeof(*ini->extensions));
 	if (!dev->extensions) {
 		wlr_log_errno(WLR_ERROR, "allocation failed");
 		goto error;
@@ -314,15 +481,17 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	// throughout the codebase).
 	const char *names[] = {
 		VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
+		VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME, // or vulkan 1.2
 		VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
 		// VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
 		VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
 	};
 
 	unsigned nc = sizeof(names) / sizeof(names[0]);
-	if (find_extensions(avail_ext_props, avail_extc, names, nc) != NULL) {
-		// TODO: better error output! We can land here often in practice
-		wlr_log(WLR_ERROR, "vulkan: required dmabuf extensions not found");
+	const char* not_found = find_extensions(avail_ext_props, avail_extc, names, nc);
+	if (not_found) {
+		wlr_log(WLR_ERROR, "vulkan: required device extesnion %s not found",
+			not_found);
 		goto error;
 	}
 
@@ -338,7 +507,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	ycbcr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
 	features.pNext = &ycbcr_features;
 
-	vkGetPhysicalDeviceFeatures2(phdev, &features);
+	ini->api.getPhysicalDeviceFeatures2(phdev, &features);
 	dev->features.ycbcr = ycbcr_features.samplerYcbcrConversion;
 	wlr_log(WLR_INFO, "YCbCr device feature: %d", dev->features.ycbcr);
 
@@ -384,14 +553,21 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		goto error;
 	}
 
+
 	vkGetDeviceQueue(dev->dev, dev->queue_family, 0, &dev->queue);
 
 	// load api
-	dev->api.getMemoryFdPropertiesKHR =
-		(PFN_vkGetMemoryFdPropertiesKHR) vkGetDeviceProcAddr(
-				dev->dev, "vkGetMemoryFdPropertiesKHR");
-	if (!dev->api.getMemoryFdPropertiesKHR) {
-		wlr_log(WLR_ERROR, "Failed to retrieve required dev func pointers");
+	dev->api.getMemoryFdPropertiesKHR = (PFN_vkGetMemoryFdPropertiesKHR)
+		vkGetDeviceProcAddr(dev->dev, "vkGetMemoryFdPropertiesKHR");
+	dev->api.bindImageMemory2 = (PFN_vkBindImageMemory2)
+		vkGetDeviceProcAddr(dev->dev, "vkBindImageMemory2");
+	dev->api.getImageMemoryRequirements2 = (PFN_vkGetImageMemoryRequirements2)
+		vkGetDeviceProcAddr(dev->dev, "vkGetImageMemoryRequirements2");
+
+	if (!dev->api.getMemoryFdPropertiesKHR ||
+			!dev->api.bindImageMemory2 ||
+			!dev->api.getImageMemoryRequirements2) {
+		wlr_log(WLR_ERROR, "Failed to retrieve required dev function pointers");
 		goto error;
 	}
 

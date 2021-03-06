@@ -253,7 +253,7 @@ bool wlr_renderer_init_wl_display(struct wlr_renderer *r,
 }
 
 struct wlr_renderer *wlr_renderer_autocreate_with_drm_fd(int drm_fd) {
-	return wlr_vk_renderer_create();
+	return wlr_vk_renderer_create_from_drm_fd(drm_fd);
 
 	/*
 	struct gbm_device *gbm_device = gbm_create_device(drm_fd);
