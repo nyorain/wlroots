@@ -407,6 +407,8 @@ static void destroy_render_buffer(struct wlr_vk_render_buffer *buffer) {
 	for (size_t i = 0u; i < buffer->mem_count; ++i) {
 		vkFreeMemory(dev, buffer->memories[i], NULL);
 	}
+
+	free(buffer);
 }
 
 static struct wlr_vk_render_buffer *get_render_buffer(
@@ -979,28 +981,16 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 		destroy_render_buffer(render_buffer);
 	}
 
-	if (renderer->vert_module) {
-		vkDestroyShaderModule(dev->dev, renderer->vert_module, NULL);
-	}
-	if (renderer->tex_frag_module) {
-		vkDestroyShaderModule(dev->dev, renderer->tex_frag_module, NULL);
-	}
-	if (renderer->fence) {
-		vkDestroyFence(dev->dev, renderer->fence, NULL);
-	}
-	if (renderer->pipe_layout) {
-		vkDestroyPipelineLayout(dev->dev, renderer->pipe_layout, NULL);
-	}
-	if (renderer->ds_layout) {
-		vkDestroyDescriptorSetLayout(dev->dev,
-			renderer->ds_layout, NULL);
-	}
-	if (renderer->sampler) {
-		vkDestroySampler(dev->dev, renderer->sampler, NULL);
-	}
-	if (renderer->command_pool) {
-		vkDestroyCommandPool(dev->dev, renderer->command_pool, NULL);
-	}
+	vkDestroyShaderModule(dev->dev, renderer->vert_module, NULL);
+	vkDestroyShaderModule(dev->dev, renderer->tex_frag_module, NULL);
+	vkDestroyShaderModule(dev->dev, renderer->quad_frag_module, NULL);
+	vkDestroyShaderModule(dev->dev, renderer->ellipse_frag_module, NULL);
+
+	vkDestroyFence(dev->dev, renderer->fence, NULL);
+	vkDestroyPipelineLayout(dev->dev, renderer->pipe_layout, NULL);
+	vkDestroyDescriptorSetLayout(dev->dev, renderer->ds_layout, NULL);
+	vkDestroySampler(dev->dev, renderer->sampler, NULL);
+	vkDestroyCommandPool(dev->dev, renderer->command_pool, NULL);
 
 	struct wlr_vk_instance *ini = dev->instance;
 	wlr_vk_device_destroy(dev);

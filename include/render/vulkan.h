@@ -17,8 +17,7 @@ struct wlr_vk_instance {
 	VkInstance instance;
 	VkDebugUtilsMessengerEXT messenger;
 
-	// will try to enable all extensions that might be used by any wlr
-	// parts later on
+	// enabled extensions
 	unsigned extension_count;
 	const char **extensions;
 
@@ -55,7 +54,7 @@ struct wlr_vk_device {
 
 	int drm_fd; // not owned
 
-	// list of enabled extensions
+	// enabled extensions
 	unsigned extension_count;
 	const char **extensions;
 
