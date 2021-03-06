@@ -506,6 +506,8 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	const char* name = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
 	if (find_extensions(avail_ext_props, avail_extc, names, nc) != NULL) {
 		dev->extensions[dev->extension_count++] = name;
+	} else {
+		wlr_log(WLR_ERROR, "vulkan: VK_EXT_queue_family_foreign not supported");
 	}
 
 	// check/enable features
