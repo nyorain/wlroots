@@ -197,6 +197,8 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 		return;
 	}
 
+	wlr_log(WLR_INFO, "vulkan: Checking support for format %.4s (0x%" PRIx32 ")",
+		(const char*) &format->drm_format, format->drm_format);
 	VkResult res;
 
 	const VkImageUsageFlags render_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -204,10 +206,10 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 		VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	const VkImageUsageFlags dma_tex_usage = VK_IMAGE_USAGE_SAMPLED_BIT;
 
-	const VkFormatFeatureFlags render_features = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
 	const VkFormatFeatureFlags tex_features = VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
 		VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
 		VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+	const VkFormatFeatureFlags render_features = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
 	const VkFormatFeatureFlags dma_tex_features = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
 
 	// get general features and modifiers
@@ -242,25 +244,8 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 	struct wlr_vk_format_props props = {0};
 	props.format = *format;
 
+	wlr_log(WLR_INFO, "  drmFormatModifierCount: %d", modp.drmFormatModifierCount);
 	if (modp.drmFormatModifierCount > 0) {
-		if (fmtp.formatProperties.optimalTilingFeatures & render_features) {
-			props.render_mods = calloc(modp.drmFormatModifierCount,
-				sizeof(*props.render_mods));
-			if (!props.render_mods) {
-				wlr_log_errno(WLR_ERROR, "Allocation failed");
-				return;
-			}
-		}
-
-		if (fmtp.formatProperties.optimalTilingFeatures & dma_tex_features) {
-			props.texture_mods = calloc(modp.drmFormatModifierCount,
-				sizeof(*props.texture_mods));
-			if (!props.texture_mods) {
-				wlr_log_errno(WLR_ERROR, "Allocation failed");
-				return;
-			}
-		}
-
 		// the first call to vkGetPhysicalDeviceFormatProperties2 did only
 		// retrieve the number of modifiers, we now have to retrieve
 		// the modifiers
@@ -274,6 +259,23 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 		dev->instance->api.getPhysicalDeviceFormatProperties2(dev->phdev,
 			format->vk_format, &fmtp);
 
+		props.render_mods = calloc(modp.drmFormatModifierCount,
+			sizeof(*props.render_mods));
+		if (!props.render_mods) {
+			wlr_log_errno(WLR_ERROR, "Allocation failed");
+			free(modp.pDrmFormatModifierProperties);
+			return;
+		}
+
+		props.texture_mods = calloc(modp.drmFormatModifierCount,
+			sizeof(*props.texture_mods));
+		if (!props.texture_mods) {
+			wlr_log_errno(WLR_ERROR, "Allocation failed");
+			free(modp.pDrmFormatModifierProperties);
+			free(props.render_mods);
+			return;
+		}
+
 		// detailed check
 		// format info
 		fmti.tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
@@ -286,14 +288,16 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 
 		// format properties
 		ifmtp.pNext = &efmtp;
-		const VkExternalMemoryProperties* emp = &efmtp.externalMemoryProperties;
+		const VkExternalMemoryProperties *emp = &efmtp.externalMemoryProperties;
 
 		for (unsigned i = 0u; i < modp.drmFormatModifierCount; ++i) {
 			VkDrmFormatModifierPropertiesEXT m =
 				modp.pDrmFormatModifierProperties[i];
+			wlr_log(WLR_INFO, "  modifier: 0x%"PRIx64 ": features 0x%"PRIx32,
+				m.drmFormatModifier, m.drmFormatModifierTilingFeatures);
 
 			// check that specific modifier for render usage
-			if (props.render_mods) {
+			if (m.drmFormatModifierTilingFeatures & render_features) {
 				fmti.usage = render_usage;
 
 				modi.drmFormatModifier = m.drmFormatModifier;
@@ -304,10 +308,10 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 						wlr_vk_error("vkGetPhysicalDeviceImageFormatProperties2",
 							res);
 					}
+
+					wlr_log(WLR_INFO, "    >> rendering: format not supported");
 				} else if ((emp->externalMemoryFeatures &
-							VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) &&
-						(emp->compatibleHandleTypes &
-						 	VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT)) {
+						VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
 					unsigned c = props.render_mod_count;
 					VkExtent3D me = ifmtp.imageFormatProperties.maxExtent;
 					VkExternalMemoryProperties emp = efmtp.externalMemoryProperties;
@@ -324,15 +328,16 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 					wlr_drm_format_set_add(&dev->dmabuf_render_formats,
 						format->drm_format, m.drmFormatModifier);
 
-					wlr_log(WLR_INFO, "vulkan: Format %.4s (0x%" PRIx32 "), "
-						"mod 0x%"PRIx64" supported for render buffer importing",
-						(const char*) &format->drm_format, format->drm_format,
-						m.drmFormatModifier);
+					wlr_log(WLR_INFO, "    >> rendering: supported");
+				} else {
+					wlr_log(WLR_INFO, "    >> rendering: importing not supported");
 				}
+			} else {
+				wlr_log(WLR_INFO, "    >> rendering: format features not supported");
 			}
 
 			// check that specific modifier for texture usage
-			if (props.texture_mods) {
+			if (m.drmFormatModifierTilingFeatures & dma_tex_features) {
 				fmti.usage = dma_tex_usage;
 
 				modi.drmFormatModifier = m.drmFormatModifier;
@@ -343,10 +348,10 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 						wlr_vk_error("vkGetPhysicalDeviceImageFormatProperties2",
 							res);
 					}
+
+					wlr_log(WLR_INFO, "    >> dmatex: format not supported");
 				} else if ((emp->externalMemoryFeatures &
-							VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) &&
-						(emp->compatibleHandleTypes &
-						 	VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT)) {
+						VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
 					unsigned c = props.texture_mod_count;
 					VkExtent3D me = ifmtp.imageFormatProperties.maxExtent;
 					VkExternalMemoryProperties emp = efmtp.externalMemoryProperties;
@@ -363,11 +368,12 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 					wlr_drm_format_set_add(&dev->dmabuf_texture_formats,
 						format->drm_format, m.drmFormatModifier);
 
-					wlr_log(WLR_INFO, "vulkan: Format %.4s (0x%" PRIx32 "), "
-						"mod 0x%"PRIx64" supported for texture importing",
-						(const char*) &format->drm_format, format->drm_format,
-						m.drmFormatModifier);
+					wlr_log(WLR_INFO, "    >> dmatex: supported");
+				} else {
+					wlr_log(WLR_INFO, "    >> dmatex: importing not supported");
 				}
+			} else {
+				wlr_log(WLR_INFO, "    >> dmatex: format features not supported");
 			}
 		}
 
