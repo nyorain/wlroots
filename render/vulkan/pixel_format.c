@@ -394,21 +394,23 @@ void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 				wlr_vk_error("vkGetPhysicalDeviceImageFormatProperties2",
 					res);
 			}
+
+			wlr_log(WLR_INFO, " >> shmtex: format not supported");
 		} else {
 			VkExtent3D me = ifmtp.imageFormatProperties.maxExtent;
 			props.max_extent.width = me.width;
 			props.max_extent.height = me.height;
 			props.features = fmtp.formatProperties.optimalTilingFeatures;
 
-			wlr_log(WLR_INFO, "vulkan: Format %.4s (0x%" PRIx32 "), "
-				"supported for textures",
-				(const char*) &format->drm_format, format->drm_format);
+			wlr_log(WLR_INFO, " >> shmtex: supported");
 
 			dev->shm_formats[dev->shm_format_count] = format->drm_format;
 			++dev->shm_format_count;
 
 			add_fmt_props = true;
 		}
+	} else {
+		wlr_log(WLR_INFO, " >> shmtex: format features not supported");
 	}
 
 	if (add_fmt_props) {
