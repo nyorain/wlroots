@@ -231,10 +231,13 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 	VkResult res;
 	VkDevice dev = renderer->dev->dev;
 
+	wlr_log(WLR_DEBUG, "vulkan_texture_from_pixels: %.4s, %dx%d",
+		(const char*) &drm_fmt, width, height);
+
 	const struct wlr_vk_format_props *fmt =
 		wlr_vk_format_from_drm(renderer->dev, drm_fmt);
 	if (fmt == NULL) {
-		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32 " (%.4s)",
+		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIx32 " (%.4s)",
 			drm_fmt, (const char*) &drm_fmt);
 		return NULL;
 	}
@@ -387,7 +390,7 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_format_props *fmt = wlr_vk_format_from_drm(renderer->dev,
 		attribs->format);
 	if (fmt == NULL) {
-		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32 " (%.4s)",
+		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIx32 " (%.4s)",
 			attribs->format, (const char*) &attribs->format);
 		return VK_NULL_HANDLE;
 	}
@@ -397,8 +400,9 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_format_modifier_props *mod =
 		wlr_vk_format_props_find_modifier(fmt, attribs->modifier, for_render);
 	if (!mod || !(mod->dmabuf_flags & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
-		wlr_log(WLR_ERROR, "Format %"PRIu32" can't be used with modifier "
-			"%"PRIu64, attribs->format, attribs->modifier);
+		wlr_log(WLR_ERROR, "Format %"PRIx32" (%.4s) can't be used with modifier "
+			"%"PRIu64, attribs->format, (const char*) &attribs->format,
+			attribs->modifier);
 		return VK_NULL_HANDLE;
 	}
 
@@ -596,15 +600,19 @@ error_image:
 
 struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer,
 		struct wlr_dmabuf_attributes *attribs) {
-	struct wlr_vk_renderer* renderer = vulkan_get_renderer(wlr_renderer);
+	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 
 	VkResult res;
 	VkDevice dev = renderer->dev->dev;
 
+	wlr_log(WLR_DEBUG, "vulkan_texture_from_dmabuf: %.4s, %dx%d",
+		(const char*) &attribs->format, attribs->width, attribs->height);
+
 	struct wlr_vk_format_props *fmt = wlr_vk_format_from_drm(renderer->dev,
 		attribs->format);
 	if (fmt == NULL) {
-		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32, attribs->format);
+		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIx32 " (%.4s)",
+			attribs->format, (const char*) &attribs->format);
 		return NULL;
 	}
 

@@ -290,7 +290,7 @@ static void log_phdev(const VkPhysicalDeviceProperties *props) {
 	uint32_t dv_minor = (props->driverVersion >> 12) & 0x3ff;
 	uint32_t dv_patch = (props->driverVersion) & 0xfff;
 
-	const char* dev_type = "unknown";
+	const char *dev_type = "unknown";
 	switch(props->deviceType) {
 		case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
 			dev_type = "integrated";
@@ -387,7 +387,7 @@ VkPhysicalDevice wlr_vk_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd) 
 			continue;
 		}
 
-		const char* name = VK_EXT_PCI_BUS_INFO_EXTENSION_NAME;
+		const char *name = VK_EXT_PCI_BUS_INFO_EXTENSION_NAME;
 
 		if (find_extensions(avail_ext_props, avail_extc, &name, 1) != NULL) {
 			wlr_log(WLR_INFO, "  Can't check pci info of device, "
@@ -488,7 +488,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	};
 
 	unsigned nc = sizeof(names) / sizeof(names[0]);
-	const char* not_found = find_extensions(avail_ext_props, avail_extc, names, nc);
+	const char *not_found = find_extensions(avail_ext_props, avail_extc, names, nc);
 	if (not_found) {
 		wlr_log(WLR_ERROR, "vulkan: required device extesnion %s not found",
 			not_found);
@@ -503,7 +503,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	// isn't well-defined without it. But since the only platform
 	// I could test this on (anv with VK_EXT_image_drm_format_modifier MR)
 	// does not expose it and works fine without it, it's optional for now.
-	const char* name = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
+	const char *name = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
 	if (find_extensions(avail_ext_props, avail_extc, names, nc) != NULL) {
 		dev->extensions[dev->extension_count++] = name;
 	} else {

@@ -412,7 +412,7 @@ static void destroy_render_buffer(struct wlr_vk_render_buffer *buffer) {
 }
 
 static struct wlr_vk_render_buffer *get_render_buffer(
-		struct wlr_vk_renderer* renderer, struct wlr_buffer *wlr_buffer) {
+		struct wlr_vk_renderer *renderer, struct wlr_buffer *wlr_buffer) {
 	struct wlr_vk_render_buffer *buffer;
 	wl_list_for_each(buffer, &renderer->render_buffers, link) {
 		if (buffer->wlr_buffer == wlr_buffer) {
@@ -431,6 +431,7 @@ static void handle_render_buffer_destroy(struct wl_listener *listener, void *dat
 static struct wlr_vk_render_buffer *create_render_buffer(
 		struct wlr_vk_renderer *renderer, struct wlr_buffer *wlr_buffer) {
 	VkResult res;
+
 	struct wlr_vk_render_buffer *buffer = calloc(1, sizeof(*buffer));
 	if (buffer == NULL) {
 		wlr_log_errno(WLR_ERROR, "Allocation failed");
@@ -443,6 +444,9 @@ static struct wlr_vk_render_buffer *create_render_buffer(
 	if (!wlr_buffer_get_dmabuf(wlr_buffer, &dmabuf)) {
 		goto error_buffer;
 	}
+
+	wlr_log(WLR_DEBUG, "vulkan create_render_buffer: %.4s, %dx%d",
+		(const char*) &dmabuf.format, dmabuf.width, dmabuf.height);
 
 	// NOTE: we could at least support WLR_DMABUF_ATTRIBUTES_FLAGS_Y_INVERT
 	// if it is needed by anyone. Can be implemented using negative viewport
@@ -463,7 +467,8 @@ static struct wlr_vk_render_buffer *create_render_buffer(
 	struct wlr_vk_format_props *fmt = wlr_vk_format_from_drm(renderer->dev,
 		dmabuf.format);
 	if (fmt == NULL) {
-		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIu32, dmabuf.format);
+		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIx32 " (%.4s)",
+			dmabuf.format, (const char*) &dmabuf.format);
 		goto error_buffer;
 	}
 
@@ -522,6 +527,7 @@ error_view:
 		vkFreeMemory(dev, buffer->memories[i], NULL);
 	}
 error_buffer:
+	wlr_dmabuf_attributes_finish(&dmabuf);
 	free(buffer);
 	return NULL;
 }
@@ -808,7 +814,7 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 			renderer->pipe_layout, 0, 1, &texture->ds, 0, NULL);
 	}
 
-	struct vert_pcr_data  vert_pcr_data;
+	struct vert_pcr_data vert_pcr_data;
 	mat3_to_mat4(matrix, vert_pcr_data.mat4);
 	vert_pcr_data.uv_off[0] = box->x / wlr_texture->width;
 	vert_pcr_data.uv_off[1] = box->y / wlr_texture->height;
@@ -818,6 +824,10 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 	if (texture->invert_y) {
 		vert_pcr_data.uv_off[1] += vert_pcr_data.uv_size[1];
 		vert_pcr_data.uv_size[1] = -vert_pcr_data.uv_size[1];
+	}
+
+	if (!texture->format->has_alpha) {
+		alpha *= -1;
 	}
 
 	vkCmdPushConstants(cb, renderer->pipe_layout,
