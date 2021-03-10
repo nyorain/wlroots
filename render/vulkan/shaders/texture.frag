@@ -11,6 +11,11 @@ layout(push_constant) uniform UBO {
 
 void main() {
 	out_color = texture(tex, uv);
-	out_color.a *= data.alpha;
+
+	if (data.alpha < 0.0) {
+		out_color.a = -data.alpha;
+	} else {
+		out_color.a *= data.alpha;
+	}
 }
 
