@@ -167,10 +167,6 @@ struct wlr_vk_instance *wlr_vk_instance_create(
 	application_info.engineVersion = WLR_VERSION_NUM;
 	application_info.apiVersion = VK_API_VERSION_1_1;
 
-	// standard_validation: reports error in api usage to debug callback
-	// renderdoc: allows to capture (and debug) frames with renderdoc
-	//   renderdoc has problems with some extensions we use atm so
-	//   does not work
 	const char *layers[] = {
 		"VK_LAYER_KHRONOS_validation",
 		// "VK_LAYER_RENDERDOC_Capture",
