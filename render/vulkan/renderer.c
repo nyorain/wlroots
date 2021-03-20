@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.h>
 #include <render/vulkan.h>
 #include <wlr/render/interface.h>
+#include <wlr/types/wlr_drm.h>
 #include <wlr/util/log.h>
 #include <wlr/render/vulkan.h>
 #include <wlr/backend/interface.h>
@@ -999,6 +1000,12 @@ static int vulkan_get_drm_fd(struct wlr_renderer *wlr_renderer) {
 static bool vulkan_init_wl_display(struct wlr_renderer *wlr_renderer,
 		struct wl_display *wl_display) {
 	if (!wlr_linux_dmabuf_v1_create(wl_display, wlr_renderer)) {
+		return false;
+	}
+
+	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
+	assert(renderer->dev->drm_fd >= 0);
+	if (!wlr_drm_create(wl_display, renderer->dev->drm_fd)) {
 		return false;
 	}
 
