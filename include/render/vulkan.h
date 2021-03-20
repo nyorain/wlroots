@@ -69,10 +69,6 @@ struct wlr_vk_device {
 		PFN_vkGetImageMemoryRequirements2 getImageMemoryRequirements2;
 	} api;
 
-	struct {
-		bool ycbcr; // Y'CbCr samplers enabled
-	} features;
-
 	uint32_t format_prop_count;
 	struct wlr_vk_format_props *format_props;
 	struct wlr_drm_format_set dmabuf_render_formats;
@@ -112,7 +108,6 @@ struct wlr_vk_format {
 	uint32_t drm_format;
 	VkFormat vk_format;
 	bool has_alpha;
-	bool ycbcr; // whether it requires a ycbcr sampler
 	unsigned plane_count;
 	struct wlr_vk_format_plane planes[WLR_DMABUF_MAX_PLANES];
 };
@@ -147,29 +142,6 @@ struct wlr_vk_format_modifier_props *wlr_vk_format_props_find_modifier(
 	struct wlr_vk_format_props *props, uint64_t mod, bool render);
 void wlr_vk_format_props_finish(struct wlr_vk_format_props *props);
 
-struct wlr_vk_ycbcr_sampler {
-	struct wl_list link;
-	VkFormat format;
-	VkSampler sampler;
-	VkSamplerYcbcrConversion conversion;
-
-	VkFilter chroma_filter;
-	VkChromaLocation chroma_location;
-
-	// ycbcr samplers have to be specified in the ds layout so each ycbcr
-	// format/sampler setup we support needs its own ds layout.
-	// Therefore each format we support also needs it own pipe layout
-	// and therefore own texture pipe, see wlr_vk_ycbcr_pipeline.
-	VkDescriptorSetLayout ds_layout;
-	VkPipelineLayout pipe_layout;
-};
-
-struct wlr_vk_ycbcr_pipeline {
-	struct wl_list link;
-	const struct wlr_vk_ycbcr_sampler *sampler;
-	VkPipeline tex_pipe;
-};
-
 // For each format we want to render, we need a separate renderpass
 // and therefore also separate pipelines.
 struct wlr_vk_render_format_setup {
@@ -177,11 +149,9 @@ struct wlr_vk_render_format_setup {
 	VkFormat render_format; // used in renderpass
 	VkRenderPass render_pass;
 
-	VkPipeline tex_pipe; // for non-ycbcr textures
+	VkPipeline tex_pipe;
 	VkPipeline quad_pipe;
 	VkPipeline ellipse_pipe;
-
-	struct wl_list ycbcr_tex_pipes;
 };
 
 // Renderer-internal represenation of an wlr_buffer imported for rendering.
@@ -214,8 +184,6 @@ struct wlr_vk_renderer {
 	VkShaderModule quad_frag_module;
 	VkShaderModule ellipse_frag_module;
 
-	// For pipelines not rendering ycbcr textures.
-	// See wlr_vk_ycbcr_sampler
 	VkDescriptorSetLayout ds_layout;
 	VkPipelineLayout pipe_layout;
 	VkSampler sampler;
@@ -237,7 +205,6 @@ struct wlr_vk_renderer {
 
 	size_t last_pool_size;
 	struct wl_list descriptor_pools; // type wlr_vk_descriptor_pool
-	struct wl_list ycbcr_samplers; // type wlr_vk_ycbcr_setup
 	struct wl_list render_format_setups;
 
 	struct wl_list destroy_textures; // wlr_vk_texture to destroy after frame
@@ -278,9 +245,6 @@ struct wlr_vk_descriptor_pool *wlr_vk_alloc_texture_ds(
 // Frees the given descriptor set from the pool its pool.
 void wlr_vk_free_ds(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_descriptor_pool *pool, VkDescriptorSet ds);
-struct wlr_vk_ycbcr_sampler *wlr_vk_find_ycbcr_sampler(
-	struct wlr_vk_renderer *renderer, const struct wlr_vk_format *fmt,
-	VkFormatFeatureFlags features, bool create_if_not_found);
 struct wlr_vk_format_props *wlr_vk_format_from_drm(
 	struct wlr_vk_device *dev, uint32_t drm_format);
 struct wlr_vk_renderer *vulkan_get_renderer(struct wlr_renderer *r);
@@ -294,7 +258,6 @@ struct wlr_vk_texture {
 	VkImage image;
 	VkImageView image_view;
 	const struct wlr_vk_format *format;
-	const struct wlr_vk_ycbcr_sampler *ycbcr_sampler;
 	VkDescriptorSet ds;
 	struct wlr_vk_descriptor_pool *ds_pool;
 	uint32_t last_used; // to track when it can be destroyed

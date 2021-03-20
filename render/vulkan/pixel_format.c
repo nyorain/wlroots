@@ -10,7 +10,6 @@ static const struct wlr_vk_format formats[] = {
 		.drm_format = DRM_FORMAT_ARGB8888,
 		.vk_format = VK_FORMAT_B8G8R8A8_SRGB,
 		.has_alpha = true,
-		.ycbcr = false,
 		.plane_count = 1,
 		.planes = {{
 			.bpb = 32,
@@ -22,7 +21,6 @@ static const struct wlr_vk_format formats[] = {
 		.drm_format = DRM_FORMAT_XRGB8888,
 		.vk_format = VK_FORMAT_B8G8R8A8_SRGB,
 		.has_alpha = false,
-		.ycbcr = false,
 		.plane_count = 1,
 		.planes = {{
 			.bpb = 32,
@@ -34,7 +32,6 @@ static const struct wlr_vk_format formats[] = {
 		.drm_format = DRM_FORMAT_XBGR8888,
 		.vk_format = VK_FORMAT_R8G8B8A8_SRGB,
 		.has_alpha = false,
-		.ycbcr = false,
 		.plane_count = 1,
 		.planes = {{
 			.bpb = 32,
@@ -46,7 +43,6 @@ static const struct wlr_vk_format formats[] = {
 		.drm_format = DRM_FORMAT_ABGR8888,
 		.vk_format = VK_FORMAT_R8G8B8A8_SRGB,
 		.has_alpha = true,
-		.ycbcr = false,
 		.plane_count = 1,
 		.planes = {{
 			.bpb = 32,
@@ -54,126 +50,6 @@ static const struct wlr_vk_format formats[] = {
 			.vsub = 1,
 		}},
 	},
-	// TODO: not sure about mapping/byte order from here
-	// switch first two?
-	// TODO: these should be srgb as well. We might have
-	// to transform them in shader, manually (not done at the moment)
-	{
-		.drm_format = DRM_FORMAT_YUYV,
-		.vk_format = VK_FORMAT_B8G8R8G8_422_UNORM,
-		.has_alpha = false,
-		.ycbcr = true,
-		.plane_count = 1,
-		.planes = {{
-			.bpb = 32, // 2x1 block
-			.hsub = 2,
-			.vsub = 1,
-		}},
-	},
-	{
-		.drm_format = DRM_FORMAT_UYVY,
-		.vk_format = VK_FORMAT_G8B8G8R8_422_UNORM,
-		.has_alpha = false,
-		.ycbcr = true,
-		.plane_count = 1,
-		.planes = {{
-			.bpb = 32, // 2x1 block
-			.hsub = 2,
-			.vsub = 1,
-		}},
-	},
-	{
-		.drm_format = DRM_FORMAT_NV12,
-		.vk_format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM,
-		.has_alpha = false,
-		.ycbcr = true,
-		.plane_count = 2,
-		.planes = {{
-			.bpb = 8, // Y
-			.hsub = 1,
-			.vsub = 1,
-		}, {
-			.bpb = 16, // CbCr, 2x2 subsampled
-			.hsub = 2,
-			.vsub = 2,
-		}},
-	},
-	{
-		.drm_format = DRM_FORMAT_NV16,
-		.vk_format = VK_FORMAT_G8_B8R8_2PLANE_422_UNORM,
-		.has_alpha = false,
-		.ycbcr = true,
-		.plane_count = 2,
-		.planes = {{
-			.bpb = 8, // Y
-			.hsub = 1,
-			.vsub = 1,
-		}, {
-			.bpb = 16, // CbCr, 2x1 subsampled
-			.hsub = 2,
-			.vsub = 1,
-		}},
-	},
-	{
-		.drm_format = DRM_FORMAT_YUV420,
-		.vk_format = VK_FORMAT_G8_B8_R8_3PLANE_420_UNORM,
-		.has_alpha = false,
-		.ycbcr = true,
-		.plane_count = 3,
-		.planes = {{
-			.bpb = 8, // Y
-			.vsub = 1,
-			.hsub = 1,
-		}, {
-			.bpb = 8, // Cb, 2x2 subsampled
-			.hsub = 2,
-			.vsub = 2,
-		}, {
-			.bpb = 8, // Cr, 2x2 subsampled
-			.hsub = 2,
-			.vsub = 2,
-		}},
-	},
-	{
-		.drm_format = DRM_FORMAT_YUV422,
-		.vk_format = VK_FORMAT_G8_B8_R8_3PLANE_422_UNORM,
-		.has_alpha = false,
-		.ycbcr = true,
-		.plane_count = 3,
-		.planes = {{
-			.bpb = 8, // Y
-			.hsub = 1,
-			.vsub = 1,
-		}, {
-			.bpb = 8, // Cb, 2x1 subsampled
-			.hsub = 2,
-			.vsub = 1,
-		}, {
-			.bpb = 8, // Cr, 2x1 subsampled
-			.hsub = 2,
-			.vsub = 1,
-		}},
-	},
-	{
-		.drm_format = DRM_FORMAT_YUV444,
-		.vk_format = VK_FORMAT_G8_B8_R8_3PLANE_444_UNORM,
-		.has_alpha = false,
-		.ycbcr = true,
-		.plane_count = 3,
-		.planes = {{
-			.bpb = 8, // Y
-			.hsub = 1,
-			.vsub = 1,
-		}, {
-			.bpb = 8, // Cb
-			.hsub = 1,
-			.vsub = 1,
-		}, {
-			.bpb = 8, // Cr
-			.hsub = 1,
-			.vsub = 1,
-		}},
-	}
 };
 
 const struct wlr_vk_format *vulkan_get_format_list(size_t *len) {
@@ -192,10 +68,6 @@ const struct wlr_vk_format *vulkan_get_format_from_drm(uint32_t drm_format) {
 
 void wlr_vk_format_props_query(struct wlr_vk_device *dev,
 		const struct wlr_vk_format* format) {
-
-	if (!dev->features.ycbcr && format->ycbcr) {
-		return;
-	}
 
 	wlr_log(WLR_INFO, "vulkan: Checking support for format %.4s (0x%" PRIx32 ")",
 		(const char*) &format->drm_format, format->drm_format);
