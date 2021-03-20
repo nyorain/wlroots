@@ -316,22 +316,6 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 	};
 	view_info.image = texture->image;
 
-	// get/create ycbcr sampler if needed
-	// conversion info must be added to imageView *and* sampler
-	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
-	if (fmt->format.ycbcr) {
-		texture->ycbcr_sampler = wlr_vk_find_ycbcr_sampler(renderer,
-			&fmt->format, fmt->features, true);
-		if (!texture->ycbcr_sampler) {
-			wlr_vk_error("Could not create ycbcr sampler", res);
-			goto error;
-		}
-
-		conversion_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-		conversion_info.conversion = texture->ycbcr_sampler->conversion;
-		view_info.pNext = &conversion_info;
-	}
-
 	res = vkCreateImageView(dev, &view_info, NULL,
 		&texture->image_view);
 	if (res != VK_SUCCESS) {
@@ -661,26 +645,6 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 		VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1
 	};
 	view_info.image = texture->image;
-
-	// get/create ycbcr sampler if needed
-	// conversion info must be added to imageView *and* sampler
-	struct VkSamplerYcbcrConversionInfo conversion_info = {0};
-	if (fmt->format.ycbcr) {
-		struct wlr_vk_format_modifier_props *mod =
-			wlr_vk_format_props_find_modifier(fmt, attribs->modifier, false);
-		assert(mod);
-
-		texture->ycbcr_sampler = wlr_vk_find_ycbcr_sampler(renderer,
-			&fmt->format, mod->props.drmFormatModifierTilingFeatures, true);
-		if (!texture->ycbcr_sampler) {
-			wlr_log(WLR_ERROR, "Could not create ycbcr setup");
-			goto error;
-		}
-
-		conversion_info.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-		conversion_info.conversion = texture->ycbcr_sampler->conversion;
-		view_info.pNext = &conversion_info;
-	}
 
 	res = vkCreateImageView(dev, &view_info, NULL, &texture->image_view);
 	if (res != VK_SUCCESS) {

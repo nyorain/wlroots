@@ -510,18 +510,6 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		wlr_log(WLR_ERROR, "vulkan: VK_EXT_queue_family_foreign not supported");
 	}
 
-	// check/enable features
-	VkPhysicalDeviceFeatures2 features = {0};
-	features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-
-	VkPhysicalDeviceSamplerYcbcrConversionFeatures ycbcr_features = {0};
-	ycbcr_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SAMPLER_YCBCR_CONVERSION_FEATURES;
-	features.pNext = &ycbcr_features;
-
-	ini->api.getPhysicalDeviceFeatures2(phdev, &features);
-	dev->features.ycbcr = ycbcr_features.samplerYcbcrConversion;
-	wlr_log(WLR_INFO, "YCbCr device feature: %d", dev->features.ycbcr);
-
 	// queue families
 	{
 		uint32_t qfam_count;
@@ -551,7 +539,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	qinfo.pQueuePriorities = &prio;
 
 	VkDeviceCreateInfo dev_info = {0};
-	dev_info.pNext = &ycbcr_features;
+	dev_info.pNext = NULL;
 	dev_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	dev_info.queueCreateInfoCount = 1u;
 	dev_info.pQueueCreateInfos = &qinfo;

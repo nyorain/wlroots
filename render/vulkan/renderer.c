@@ -42,10 +42,6 @@ struct wlr_vk_renderer *vulkan_get_renderer(struct wlr_renderer *wlr_renderer) {
 
 static struct wlr_vk_render_format_setup *find_or_create_render_setup(
 		struct wlr_vk_renderer *renderer, VkFormat format);
-static struct wlr_vk_ycbcr_pipeline *find_or_create_ycbcr_pipeline(
-		struct wlr_vk_renderer *renderer,
-		struct wlr_vk_render_format_setup *setup,
-		const struct wlr_vk_ycbcr_sampler *sampler);
 
 // vertex shader push constant range data
 struct vert_pcr_data {
@@ -139,22 +135,6 @@ void wlr_vk_free_ds(struct wlr_vk_renderer *renderer,
 	++pool->free;
 }
 
-static void destroy_ycbcr_sampler(struct wlr_vk_renderer *renderer,
-		struct wlr_vk_ycbcr_sampler *sampler) {
-	if (!sampler) {
-		return;
-	}
-
-	VkDevice dev = renderer->dev->dev;
-	vkDestroySamplerYcbcrConversion(dev, sampler->conversion, NULL);
-	vkDestroySampler(dev, sampler->sampler, NULL);
-	vkDestroyDescriptorSetLayout(dev, sampler->ds_layout, NULL);
-	vkDestroyPipelineLayout(dev, sampler->pipe_layout, NULL);
-
-	wl_list_remove(&sampler->link);
-	free(sampler);
-}
-
 static void destroy_render_format_setup(struct wlr_vk_renderer *renderer,
 		struct wlr_vk_render_format_setup *setup) {
 	if (!setup) {
@@ -166,13 +146,6 @@ static void destroy_render_format_setup(struct wlr_vk_renderer *renderer,
 	vkDestroyPipeline(dev, setup->tex_pipe, NULL);
 	vkDestroyPipeline(dev, setup->quad_pipe, NULL);
 	vkDestroyPipeline(dev, setup->ellipse_pipe, NULL);
-
-	struct wlr_vk_ycbcr_pipeline *pipe, *tmp_pipe;
-	wl_list_for_each_safe(pipe, tmp_pipe, &setup->ycbcr_tex_pipes, link) {
-		vkDestroyPipeline(dev, pipe->tex_pipe, NULL);
-		wl_list_remove(&pipe->link);
-		free(pipe);
-	}
 }
 
 static void shared_buffer_destroy(struct wlr_vk_renderer *r,
@@ -790,29 +763,10 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 		wl_list_insert(&renderer->foreign_textures, &texture->foreign_link);
 	}
 
-	// if the texture uses a ycbcr format we have to use the special pipe
-	// created for in on creation. Vulkan basically requires special pipelines
-	// for rendering ycbcr textures
-	if (texture->format->ycbcr) {
-		assert(texture->ycbcr_sampler);
-		struct wlr_vk_ycbcr_pipeline *pipe = find_or_create_ycbcr_pipeline(
-			renderer, renderer->current_render_buffer->render_setup,
-			texture->ycbcr_sampler);
-
-		if (!pipe) {
-			return false;
-		}
-
-		vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			pipe->tex_pipe);
-		vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			texture->ycbcr_sampler->pipe_layout, 0, 1, &texture->ds, 0, NULL);
-	} else {
-		vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			renderer->current_render_buffer->render_setup->tex_pipe);
-		vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-			renderer->pipe_layout, 0, 1, &texture->ds, 0, NULL);
-	}
+	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		renderer->current_render_buffer->render_setup->tex_pipe);
+	vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
+		renderer->pipe_layout, 0, 1, &texture->ds, 0, NULL);
 
 	struct vert_pcr_data vert_pcr_data;
 	mat3_to_mat4(matrix, vert_pcr_data.mat4);
@@ -1076,6 +1030,8 @@ static const struct wlr_renderer_impl renderer_impl = {
 	.get_drm_fd = vulkan_get_drm_fd,
 };
 
+// Initializes the VkDescriptorSetLayout and VkPipelineLayout needed
+// for the texture rendering pipeline using the given VkSampler.
 static bool init_tex_layouts(struct wlr_vk_renderer *renderer,
 		VkSampler tex_sampler, VkDescriptorSetLayout *out_ds_layout,
 		VkPipelineLayout *out_pipe_layout) {
@@ -1125,6 +1081,8 @@ static bool init_tex_layouts(struct wlr_vk_renderer *renderer,
 	return true;
 }
 
+// Initializes the pipeline for rendering textures and using the given
+// VkRenderPass and VkPipelineLayout.
 static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 		VkRenderPass rp, VkPipelineLayout pipe_layout, VkPipeline *pipe) {
 	VkResult res;
@@ -1223,123 +1181,9 @@ static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 	return true;
 }
 
-struct wlr_vk_ycbcr_sampler *wlr_vk_find_ycbcr_sampler(
-		struct wlr_vk_renderer *renderer, const struct wlr_vk_format *fmt,
-		VkFormatFeatureFlags features, bool create_if_not_found) {
-
-	VkFilter chroma_filter;
-	VkChromaLocation chroma_location;
-
-	// TODO: not sure what to prefer of those two flags
-	if (features & VK_FORMAT_FEATURE_MIDPOINT_CHROMA_SAMPLES_BIT) {
-		chroma_location = VK_CHROMA_LOCATION_MIDPOINT;
-	} else if (features & VK_FORMAT_FEATURE_COSITED_CHROMA_SAMPLES_BIT) {
-		chroma_location = VK_CHROMA_LOCATION_COSITED_EVEN;
-	} else {
-		wlr_log(WLR_ERROR, "Format does support no chroma sampling mode");
-		return NULL;
-	}
-
-	if (features & VK_FORMAT_FEATURE_SAMPLED_IMAGE_YCBCR_CONVERSION_LINEAR_FILTER_BIT) {
-		chroma_filter = VK_FILTER_LINEAR;
-	} else {
-		chroma_filter = VK_FILTER_NEAREST;
-	}
-
-	struct wlr_vk_ycbcr_sampler *sampler;
-	wl_list_for_each(sampler, &renderer->ycbcr_samplers, link) {
-		if (sampler->format == fmt->vk_format &&
-				sampler->chroma_filter == chroma_filter &&
-				sampler->chroma_location == chroma_location) {
-			return sampler;
-		}
-	}
-
-	if (!create_if_not_found) {
-		return NULL;
-	}
-
-	VkResult res;
-	VkDevice dev = renderer->dev->dev;
-
-	sampler = calloc(1, sizeof(*sampler));
-	if (!sampler) {
-		wlr_log_errno(WLR_ERROR, "Allocation failed");
-		goto error;
-	}
-
-	sampler->format = fmt->vk_format;
-	sampler->chroma_filter = chroma_filter;
-	sampler->chroma_location = chroma_location;
-
-	// conversion
-	VkSamplerYcbcrConversionCreateInfo conversioni = {0};
-	conversioni.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_CREATE_INFO;
-	conversioni.format = sampler->format;
-	conversioni.chromaFilter = chroma_filter;
-	conversioni.xChromaOffset = chroma_location;
-	conversioni.yChromaOffset = chroma_location;
-	// TODO: yeah, absolute no idea on those three.
-	// explained in more detail in the vulkan spec.
-	// maybe the values to use here can be inferred from a future wayland
-	// color space protocol.
-	conversioni.ycbcrModel = VK_SAMPLER_YCBCR_MODEL_CONVERSION_YCBCR_601;
-	conversioni.ycbcrRange = VK_SAMPLER_YCBCR_RANGE_ITU_FULL;
-	conversioni.forceExplicitReconstruction = false;
-
-	conversioni.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-	conversioni.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-	conversioni.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-	if (fmt->has_alpha) {
-		conversioni.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-	} else {
-		conversioni.components.a = VK_COMPONENT_SWIZZLE_ONE;
-	}
-
-	res = vkCreateSamplerYcbcrConversion(dev, &conversioni, NULL,
-		&sampler->conversion);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("vkCreateSamplerYcbcrConversion", res);
-		goto error;
-	}
-
-	wlr_log(WLR_DEBUG, "created ycbcr conversion: %p", &sampler->conversion);
-
-	// sampler
-	VkSamplerCreateInfo sampleri = {0};
-	sampleri.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	sampleri.magFilter = VK_FILTER_LINEAR;
-	sampleri.minFilter = VK_FILTER_LINEAR;
-	sampleri.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-	sampleri.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sampleri.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sampleri.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-	sampleri.maxAnisotropy = 1.f;
-	sampleri.minLod = 0.f;
-	sampleri.maxLod = 0.25f;
-	sampleri.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-
-	VkSamplerYcbcrConversionInfo sampler_conversioni = {0};
-	sampler_conversioni.sType = VK_STRUCTURE_TYPE_SAMPLER_YCBCR_CONVERSION_INFO;
-	sampler_conversioni.conversion = sampler->conversion;
-	sampleri.pNext = &sampler_conversioni;
-
-	res = vkCreateSampler(dev, &sampleri, NULL, &sampler->sampler);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create sampler", res);
-		goto error;
-	}
-
-	// init tex pipeline
-	wl_list_insert(&renderer->ycbcr_samplers, &sampler->link);
-	return sampler;
-
-error:
-	destroy_ycbcr_sampler(renderer, sampler);
-	return NULL;
-}
-
-// cleanup is done by destroying the renderer
+// Creates static render data, such as sampler, layouts and shader modules
+// for the given rednerer.
+// Cleanup is done by destroying the renderer.
 static bool init_static_render_data(struct wlr_vk_renderer *renderer) {
 	VkResult res;
 	VkDevice dev = renderer->dev->dev;
@@ -1428,7 +1272,6 @@ static struct wlr_vk_render_format_setup *find_or_create_render_setup(
 	}
 
 	setup->render_format = format;
-	wl_list_init(&setup->ycbcr_tex_pipes);
 
 	// util
 	VkDevice dev = renderer->dev->dev;
@@ -1610,34 +1453,6 @@ error:
 	return NULL;
 }
 
-static struct wlr_vk_ycbcr_pipeline *find_or_create_ycbcr_pipeline(
-		struct wlr_vk_renderer *renderer,
-		struct wlr_vk_render_format_setup *setup,
-		const struct wlr_vk_ycbcr_sampler *sampler) {
-	struct wlr_vk_ycbcr_pipeline *pipe;
-	wl_list_for_each(pipe, &setup->ycbcr_tex_pipes, link) {
-		if (pipe->sampler == sampler) {
-			return pipe;
-		}
-	}
-
-	pipe = calloc(1u, sizeof(*pipe));
-	if (!setup) {
-		wlr_log(WLR_ERROR, "Allocation failed");
-		return NULL;
-	}
-
-	pipe->sampler = sampler;
-	if (!init_tex_pipeline(renderer, setup->render_pass,
-			sampler->pipe_layout, &pipe->tex_pipe)) {
-		free(pipe);
-		return NULL;
-	}
-
-	wl_list_insert(&setup->ycbcr_tex_pipes, &pipe->link);
-	return pipe;
-}
-
 struct wlr_renderer *wlr_vk_renderer_create_for_device(struct wlr_vk_device *dev) {
 	struct wlr_vk_renderer *renderer;
 	VkResult res;
@@ -1652,7 +1467,6 @@ struct wlr_renderer *wlr_vk_renderer_create_for_device(struct wlr_vk_device *dev
 	wl_list_init(&renderer->destroy_textures);
 	wl_list_init(&renderer->foreign_textures);
 	wl_list_init(&renderer->descriptor_pools);
-	wl_list_init(&renderer->ycbcr_samplers);
 	wl_list_init(&renderer->render_format_setups);
 	wl_list_init(&renderer->render_buffers);
 
