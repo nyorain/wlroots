@@ -9,6 +9,7 @@
 #include <render/vulkan.h>
 #include <wlr/render/interface.h>
 #include <wlr/types/wlr_drm.h>
+#include <wlr/types/wlr_matrix.h>
 #include <wlr/util/log.h>
 #include <wlr/render/vulkan.h>
 #include <wlr/backend/interface.h>
@@ -563,6 +564,10 @@ static void vulkan_begin(struct wlr_renderer *wlr_renderer,
 	vkCmdSetViewport(cb, 0, 1, &vp);
 	vkCmdSetScissor(cb, 0, 1, &rect);
 
+	// refresh projection matrix
+	wlr_matrix_projection(renderer->projection, width, height,
+		WL_OUTPUT_TRANSFORM_NORMAL);
+
 	renderer->render_width = width;
 	renderer->render_height = height;
 	renderer->recording_cb = true;
@@ -769,8 +774,12 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 	vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		renderer->pipe_layout, 0, 1, &texture->ds, 0, NULL);
 
+	float final_matrix[9];
+	wlr_matrix_multiply(final_matrix, renderer->projection, matrix);
+
 	struct vert_pcr_data vert_pcr_data;
-	mat3_to_mat4(matrix, vert_pcr_data.mat4);
+	mat3_to_mat4(final_matrix, vert_pcr_data.mat4);
+
 	vert_pcr_data.uv_off[0] = box->x / wlr_texture->width;
 	vert_pcr_data.uv_off[1] = box->y / wlr_texture->height;
 	vert_pcr_data.uv_size[0] = box->width / wlr_texture->width;
@@ -854,8 +863,11 @@ static void vulkan_render_quad_with_matrix(struct wlr_renderer *wlr_renderer,
 	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		renderer->current_render_buffer->render_setup->quad_pipe);
 
-	struct vert_pcr_data  vert_pcr_data;
-	mat3_to_mat4(matrix, vert_pcr_data.mat4);
+	float final_matrix[9];
+	wlr_matrix_multiply(final_matrix, renderer->projection, matrix);
+
+	struct vert_pcr_data vert_pcr_data;
+	mat3_to_mat4(final_matrix, vert_pcr_data.mat4);
 	vert_pcr_data.uv_off[0] = 0.f;
 	vert_pcr_data.uv_off[1] = 0.f;
 	vert_pcr_data.uv_size[0] = 1.f;
@@ -878,8 +890,11 @@ static void vulkan_render_ellipse_with_matrix(struct wlr_renderer *wlr_renderer,
 	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
 		renderer->current_render_buffer->render_setup->ellipse_pipe);
 
-	struct vert_pcr_data  vert_pcr_data;
-	mat3_to_mat4(matrix, vert_pcr_data.mat4);
+	float final_matrix[9];
+	wlr_matrix_multiply(final_matrix, renderer->projection, matrix);
+
+	struct vert_pcr_data vert_pcr_data;
+	mat3_to_mat4(final_matrix, vert_pcr_data.mat4);
 	vert_pcr_data.uv_off[0] = 0.f;
 	vert_pcr_data.uv_off[1] = 0.f;
 	vert_pcr_data.uv_size[0] = 1.f;
