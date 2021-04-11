@@ -18,7 +18,6 @@
 #include <render/vulkan/shaders/common.vert.h>
 #include <render/vulkan/shaders/texture.frag.h>
 #include <render/vulkan/shaders/quad.frag.h>
-#include <render/vulkan/shaders/ellipse.frag.h>
 
 // TODO:
 // - simplify stage allocation, don't track allocations but use ringbuffer-like
@@ -147,7 +146,6 @@ static void destroy_render_format_setup(struct wlr_vk_renderer *renderer,
 	vkDestroyRenderPass(dev, setup->render_pass, NULL);
 	vkDestroyPipeline(dev, setup->tex_pipe, NULL);
 	vkDestroyPipeline(dev, setup->quad_pipe, NULL);
-	vkDestroyPipeline(dev, setup->ellipse_pipe, NULL);
 }
 
 static void shared_buffer_destroy(struct wlr_vk_renderer *r,
@@ -881,33 +879,6 @@ static void vulkan_render_quad_with_matrix(struct wlr_renderer *wlr_renderer,
 	vkCmdDraw(cb, 4, 1, 0, 0);
 }
 
-static void vulkan_render_ellipse_with_matrix(struct wlr_renderer *wlr_renderer,
-		const float color[static 4], const float matrix[static 9]) {
-	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
-	assert(renderer->cb && renderer->recording_cb);
-	VkCommandBuffer cb = renderer->cb;
-
-	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS,
-		renderer->current_render_buffer->render_setup->ellipse_pipe);
-
-	float final_matrix[9];
-	wlr_matrix_multiply(final_matrix, renderer->projection, matrix);
-
-	struct vert_pcr_data vert_pcr_data;
-	mat3_to_mat4(final_matrix, vert_pcr_data.mat4);
-	vert_pcr_data.uv_off[0] = 0.f;
-	vert_pcr_data.uv_off[1] = 0.f;
-	vert_pcr_data.uv_size[0] = 1.f;
-	vert_pcr_data.uv_size[1] = 1.f;
-
-	vkCmdPushConstants(cb, renderer->pipe_layout,
-		VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(vert_pcr_data), &vert_pcr_data);
-	vkCmdPushConstants(cb, renderer->pipe_layout,
-		VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(vert_pcr_data), sizeof(float) * 4,
-		color);
-	vkCmdDraw(cb, 4, 1, 0, 0);
-}
-
 static const struct wlr_drm_format_set *vulkan_get_dmabuf_texture_formats(
 		struct wlr_renderer *wlr_renderer) {
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
@@ -964,7 +935,6 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 	vkDestroyShaderModule(dev->dev, renderer->vert_module, NULL);
 	vkDestroyShaderModule(dev->dev, renderer->tex_frag_module, NULL);
 	vkDestroyShaderModule(dev->dev, renderer->quad_frag_module, NULL);
-	vkDestroyShaderModule(dev->dev, renderer->ellipse_frag_module, NULL);
 
 	vkDestroyFence(dev->dev, renderer->fence, NULL);
 	vkDestroyPipelineLayout(dev->dev, renderer->pipe_layout, NULL);
@@ -976,26 +946,6 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 	wlr_vk_device_destroy(dev);
 	wlr_vk_instance_destroy(ini);
 	free(renderer);
-}
-
-static bool vulkan_blit_dmabuf(struct wlr_renderer *wlr_renderer,
-		struct wlr_dmabuf_attributes *dst_attr,
-		struct wlr_dmabuf_attributes *src_attr) {
-	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
-	(void) renderer;
-	wlr_log(WLR_ERROR, "vulkan_blit_dmabuf not implemented");
-	// TODO: implement!
-	// 1: import src_attr (image usage transfer_src, check format support blit_src)
-	// 2: import dst_attr (image usage transfer_dst, check format support transfer_src)
-	// 3: record cb with vkCmdBlit
-	// 4: submit cb
-	// 5: wait for associated fence :(
-	// - should probably keep a list of already imported dmabufs,
-	//   importing is a heavy operation. Not sure how to best do this,
-	//   the only user of this is wlr_screencopy_v1 which always passes
-	//   something we have previously imported as renderbuffer in src_attr
-	//   and always the same buffer in dst_attr.
-	return false;
 }
 
 static bool vulkan_read_pixels(struct wlr_renderer *wlr_renderer,
@@ -1035,7 +985,6 @@ static const struct wlr_renderer_impl renderer_impl = {
 	.scissor = vulkan_scissor,
 	.render_subtexture_with_matrix = vulkan_render_subtexture_with_matrix,
 	.render_quad_with_matrix = vulkan_render_quad_with_matrix,
-	.render_ellipse_with_matrix = vulkan_render_ellipse_with_matrix,
 	.get_shm_texture_formats = vulkan_get_shm_texture_formats,
 	.resource_is_wl_drm_buffer = NULL,
 	.wl_drm_buffer_get_size = NULL,
@@ -1048,7 +997,6 @@ static const struct wlr_renderer_impl renderer_impl = {
 	.texture_from_dmabuf = vulkan_texture_from_dmabuf,
 	.destroy = vulkan_destroy,
 	.init_wl_display = vulkan_init_wl_display,
-	.blit_dmabuf = vulkan_blit_dmabuf,
 	.get_drm_fd = vulkan_get_drm_fd,
 };
 
@@ -1175,7 +1123,7 @@ static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 	VkPipelineVertexInputStateCreateInfo vertex = {0};
 	vertex.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
-	VkGraphicsPipelineCreateInfo pinfo = {};
+	VkGraphicsPipelineCreateInfo pinfo = {0};
 	pinfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	pinfo.layout = pipe_layout;
 	pinfo.renderPass = rp;
@@ -1262,15 +1210,6 @@ static bool init_static_render_data(struct wlr_vk_renderer *renderer) {
 	res = vkCreateShaderModule(dev, &sinfo, NULL, &renderer->quad_frag_module);
 	if (res != VK_SUCCESS) {
 		wlr_vk_error("Failed to create quad fragment shader module", res);
-		return false;
-	}
-
-	// ellipse frag
-	sinfo.codeSize = sizeof(ellipse_frag_data);
-	sinfo.pCode = ellipse_frag_data;
-	res = vkCreateShaderModule(dev, &sinfo, NULL, &renderer->ellipse_frag_module);
-	if (res != VK_SUCCESS) {
-		wlr_vk_error("Failed to create ellipse fragment shader module", res);
 		return false;
 	}
 
@@ -1376,12 +1315,6 @@ static struct wlr_vk_render_format_setup *find_or_create_render_setup(
 		renderer->quad_frag_module, "main", NULL
 	}};
 
-	VkPipelineShaderStageCreateInfo ellipse_stages[2] = {vert_stage, {
-		VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-		NULL, 0, VK_SHADER_STAGE_FRAGMENT_BIT,
-		renderer->ellipse_frag_module, "main", NULL
-	}};
-
 	// info
 	VkPipelineInputAssemblyStateCreateInfo assembly = {0};
 	assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -1434,38 +1367,30 @@ static struct wlr_vk_render_format_setup *find_or_create_render_setup(
 	VkPipelineVertexInputStateCreateInfo vertex = {0};
 	vertex.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
-	VkGraphicsPipelineCreateInfo pinfos[2] = {0};
-	pinfos[0].sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	pinfos[0].layout = renderer->pipe_layout;
-	pinfos[0].renderPass = setup->render_pass;
-	pinfos[0].subpass = 0;
-	pinfos[0].stageCount = 2;
-	pinfos[0].pStages = ellipse_stages;
+	VkGraphicsPipelineCreateInfo pinfo = {0};
+	pinfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	pinfo.layout = renderer->pipe_layout;
+	pinfo.renderPass = setup->render_pass;
+	pinfo.subpass = 0;
+	pinfo.stageCount = 2;
+	pinfo.pStages = quad_stages;
 
-	pinfos[0].pInputAssemblyState = &assembly;
-	pinfos[0].pRasterizationState = &rasterization;
-	pinfos[0].pColorBlendState = &blend;
-	pinfos[0].pMultisampleState = &multisample;
-	pinfos[0].pViewportState = &viewport;
-	pinfos[0].pDynamicState = &dynamic;
-	pinfos[0].pVertexInputState = &vertex;
-
-	pinfos[1] = pinfos[0];
-	pinfos[1].pStages = quad_stages;
-
-	VkPipeline pipes[2];
+	pinfo.pInputAssemblyState = &assembly;
+	pinfo.pRasterizationState = &rasterization;
+	pinfo.pColorBlendState = &blend;
+	pinfo.pMultisampleState = &multisample;
+	pinfo.pViewportState = &viewport;
+	pinfo.pDynamicState = &dynamic;
+	pinfo.pVertexInputState = &vertex;
 
 	// NOTE: use could use a cache here for faster loading
 	// store it somewhere like $XDG_CACHE_HOME/wlroots/vk_pipe_cache.bin
 	VkPipelineCache cache = VK_NULL_HANDLE;
-	res = vkCreateGraphicsPipelines(dev, cache, 2, pinfos, NULL, pipes);
+	res = vkCreateGraphicsPipelines(dev, cache, 1, &pinfo, NULL, &setup->quad_pipe);
 	if (res != VK_SUCCESS) {
-		wlr_log(WLR_ERROR, "failed to create vulkan pipelines: %d", res);
+		wlr_log(WLR_ERROR, "failed to create vulkan quad pipeline: %d", res);
 		goto error;
 	}
-
-	setup->ellipse_pipe = pipes[0];
-	setup->quad_pipe = pipes[1];
 
 	wl_list_insert(&renderer->render_format_setups, &setup->link);
 	return setup;

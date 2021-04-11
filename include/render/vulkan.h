@@ -151,7 +151,6 @@ struct wlr_vk_render_format_setup {
 
 	VkPipeline tex_pipe;
 	VkPipeline quad_pipe;
-	VkPipeline ellipse_pipe;
 };
 
 // Renderer-internal represenation of an wlr_buffer imported for rendering.
@@ -182,7 +181,6 @@ struct wlr_vk_renderer {
 	VkShaderModule vert_module;
 	VkShaderModule tex_frag_module;
 	VkShaderModule quad_frag_module;
-	VkShaderModule ellipse_frag_module;
 
 	VkDescriptorSetLayout ds_layout;
 	VkPipelineLayout pipe_layout;

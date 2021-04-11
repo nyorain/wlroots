@@ -167,18 +167,6 @@ static bool vulkan_texture_write_pixels(struct wlr_texture *wlr_texture,
 	return true;
 }
 
-static bool vulkan_texture_to_dmabuf(struct wlr_texture *wlr_texture,
-		struct wlr_dmabuf_attributes *attribs) {
-	// NOTE: we could implement this but that requires some ugly
-	// bits like always setting some exportable flags for *all* created
-	// texture images. Since that function isn't used anywhere right
-	// now, we should remove it/find a solutions for the problems
-	// it solves.
-	// struct wlr_vk_texture *texture = vulkan_get_texture(wlr_texture);
-	wlr_log(WLR_ERROR, "texture_to_dmabuf not supported on vulkan at the moment");
-	return false;
-}
-
 static void vulkan_texture_destroy(struct wlr_texture *wlr_texture) {
 	if (wlr_texture == NULL) {
 		return;
@@ -219,7 +207,6 @@ static void vulkan_texture_destroy(struct wlr_texture *wlr_texture) {
 static const struct wlr_texture_impl texture_impl = {
 	.is_opaque = vulkan_texture_is_opaque,
 	.write_pixels = vulkan_texture_write_pixels,
-	.to_dmabuf = vulkan_texture_to_dmabuf,
 	.destroy = vulkan_texture_destroy,
 };
 
