@@ -486,7 +486,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	unsigned nc = sizeof(names) / sizeof(names[0]);
 	const char *not_found = find_extensions(avail_ext_props, avail_extc, names, nc);
 	if (not_found) {
-		wlr_log(WLR_ERROR, "vulkan: required device extesnion %s not found",
+		wlr_log(WLR_ERROR, "vulkan: required device extension %s not found",
 			not_found);
 		goto error;
 	}

@@ -51,6 +51,15 @@ struct vert_pcr_data {
 	float uv_size[2];
 };
 
+// https://www.w3.org/Graphics/Color/srgb
+// NOTE: disabled for now as we don't use sRGB/gamma-correct blending, see
+// https://github.com/swaywm/wlroots/pull/2771#issuecomment-821983938.
+// static float color_to_linear(float non_linear) {
+// 	return (non_linear > 0.04045) ?
+// 		pow((non_linear + 0.055) / 1.055, 2.4) :
+// 		non_linear / 12.92;
+// }
+
 // renderer
 // util
 static void mat3_to_mat4(const float mat3[9], float mat4[4][4]) {
@@ -781,6 +790,10 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 		vert_pcr_data.uv_size[1] = -vert_pcr_data.uv_size[1];
 	}
 
+	// When the texture itself does not have alpha information we want
+	// to ignore the sampled value and just use the alpha passed here,
+	// we pass a negative value to communicate that.
+	// See the texture.frag shader for more details.
 	if (!texture->format->has_alpha) {
 		alpha *= -1;
 	}
@@ -806,13 +819,18 @@ static void vulkan_clear(struct wlr_renderer *wlr_renderer,
 	att.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	att.colorAttachment = 0u;
 
-	// input color values are given in srgb space, vulkan expects
-	// them in linear space.
-	// TODO: correct srgb conversion, not just pow approx
-	att.clearValue.color.float32[0] = pow(color[0], 2.2);
-	att.clearValue.color.float32[1] = pow(color[1], 2.2);
-	att.clearValue.color.float32[2] = pow(color[2], 2.2);
-	att.clearValue.color.float32[3] = pow(color[3], 2.2);
+	// Input color values are given in srgb space, vulkan expects
+	// them in linear space. We explicitly import argb8 render buffers
+	// as srgb, vulkan will convert the input values we give here to
+	// srgb first.
+	// But in other parts of wlroots we just always assume
+	// srgb so that's why we have to convert here.
+	// NOTE: disabled for now as we don't use sRGB textures, see
+	// https://github.com/swaywm/wlroots/pull/2771#issuecomment-821983938.
+	att.clearValue.color.float32[0] = color[0]; // color_to_linear(color[0]);
+	att.clearValue.color.float32[1] = color[1]; // color_to_linear(color[1]);
+	att.clearValue.color.float32[2] = color[2]; // color_to_linear(color[2]);
+	att.clearValue.color.float32[3] = color[3]; // no conversion for alpha
 
 	VkClearRect rect = {0};
 	rect.rect = renderer->scissor;
@@ -864,11 +882,26 @@ static void vulkan_render_quad_with_matrix(struct wlr_renderer *wlr_renderer,
 	vert_pcr_data.uv_size[0] = 1.f;
 	vert_pcr_data.uv_size[1] = 1.f;
 
+	// Input color values are given in srgb space, shader expects
+	// them in linear space. The shader does all computation in linear
+	// space and expects in inputs in linear space since it outputs
+	// colors in linear space as well (and vulkan then automatically
+	// does the conversion for out SRGB render targets).
+	// But in other parts of wlroots we just always assume
+	// srgb so that's why we have to convert here.
+	// NOTE: disabled for now as we don't use sRGB textures, see
+	// https://github.com/swaywm/wlroots/pull/2771#issuecomment-821983938.
+	float linear_color[4];
+	linear_color[0] = color[0]; // color_to_linear(color[0]);
+	linear_color[1] = color[1]; // color_to_linear(color[1]);
+	linear_color[2] = color[2]; // color_to_linear(color[2]);
+	linear_color[3] = color[3]; // no conversion for alpha
+
 	vkCmdPushConstants(cb, renderer->pipe_layout,
 		VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(vert_pcr_data), &vert_pcr_data);
 	vkCmdPushConstants(cb, renderer->pipe_layout,
 		VK_SHADER_STAGE_FRAGMENT_BIT, sizeof(vert_pcr_data), sizeof(float) * 4,
-		color);
+		linear_color);
 	vkCmdDraw(cb, 4, 1, 0, 0);
 }
 
@@ -1078,10 +1111,11 @@ static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 
 	VkPipelineColorBlendAttachmentState blend_attachment = {0};
 	blend_attachment.blendEnable = true;
+	// we generally work with pre-multiplied alpha
 	blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
 	blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 	blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
-	blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
 	blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 	blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
 	blend_attachment.colorWriteMask =
