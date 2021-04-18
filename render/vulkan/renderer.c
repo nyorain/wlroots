@@ -52,13 +52,11 @@ struct vert_pcr_data {
 };
 
 // https://www.w3.org/Graphics/Color/srgb
-// NOTE: disabled for now as we don't use sRGB/gamma-correct blending, see
-// https://github.com/swaywm/wlroots/pull/2771#issuecomment-821983938.
-// static float color_to_linear(float non_linear) {
-// 	return (non_linear > 0.04045) ?
-// 		pow((non_linear + 0.055) / 1.055, 2.4) :
-// 		non_linear / 12.92;
-// }
+static float color_to_linear(float non_linear) {
+	return (non_linear > 0.04045) ?
+		pow((non_linear + 0.055) / 1.055, 2.4) :
+		non_linear / 12.92;
+}
 
 // renderer
 // util
@@ -601,25 +599,24 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 	memset(acquire_barriers, 0, sizeof(VkImageMemoryBarrier) * barrier_count);
 	memset(release_barriers, 0, sizeof(VkImageMemoryBarrier) * barrier_count);
 
-	struct wlr_vk_texture *texture;
+	struct wlr_vk_texture *texture, *tmp_tex;
 	unsigned idx = 0;
 
-	wl_list_for_each(texture, &renderer->foreign_textures, foreign_link) {
+	wl_list_for_each_safe(texture, tmp_tex, &renderer->foreign_textures, foreign_link) {
 		VkImageLayout src_layout = VK_IMAGE_LAYOUT_GENERAL;
 		if (!texture->transitioned) {
 			src_layout = VK_IMAGE_LAYOUT_PREINITIALIZED;
 			texture->transitioned = true;
 		}
 
-		// acuire
+		// acquire
 		acquire_barriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		acquire_barriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
 		acquire_barriers[idx].dstQueueFamilyIndex = renderer->dev->queue_family;
 		acquire_barriers[idx].image = texture->image;
 		acquire_barriers[idx].oldLayout = src_layout;
 		acquire_barriers[idx].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-		acquire_barriers[idx].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT |
-			VK_ACCESS_MEMORY_WRITE_BIT;
+		acquire_barriers[idx].srcAccessMask = 0u; // ignored anyways
 		acquire_barriers[idx].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 		acquire_barriers[idx].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		acquire_barriers[idx].subresourceRange.layerCount = 1;
@@ -633,14 +630,14 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 		release_barriers[idx].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		release_barriers[idx].newLayout = VK_IMAGE_LAYOUT_GENERAL;
 		release_barriers[idx].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-		release_barriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT |
-			VK_ACCESS_MEMORY_WRITE_BIT;
+		release_barriers[idx].dstAccessMask = 0u; // ignored anyways
 		release_barriers[idx].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		release_barriers[idx].subresourceRange.layerCount = 1;
 		release_barriers[idx].subresourceRange.levelCount = 1;
 		++idx;
 
 		texture->foreign_link.next = texture->foreign_link.prev = NULL;
+		texture->owned = false;
 	}
 
 	wl_list_init(&renderer->foreign_textures); // clear list
@@ -652,20 +649,21 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 		renderer->current_render_buffer->transitioned = true;
 	}
 
+	// acquire render buffer before rendering
 	acquire_barriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	acquire_barriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
 	acquire_barriers[idx].dstQueueFamilyIndex = renderer->dev->queue_family;
 	acquire_barriers[idx].image = renderer->current_render_buffer->image;
 	acquire_barriers[idx].oldLayout = src_layout;
 	acquire_barriers[idx].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-	acquire_barriers[idx].srcAccessMask = VK_ACCESS_MEMORY_READ_BIT |
-		VK_ACCESS_MEMORY_WRITE_BIT;
+	acquire_barriers[idx].srcAccessMask = 0u; // ignored anyways
 	acquire_barriers[idx].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
 		VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 	acquire_barriers[idx].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	acquire_barriers[idx].subresourceRange.layerCount = 1;
 	acquire_barriers[idx].subresourceRange.levelCount = 1;
 
+	// release render buffer after rendering
 	release_barriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	release_barriers[idx].srcQueueFamilyIndex = renderer->dev->queue_family;
 	release_barriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
@@ -674,8 +672,7 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 	release_barriers[idx].newLayout = VK_IMAGE_LAYOUT_GENERAL;
 	release_barriers[idx].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
 		VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-	release_barriers[idx].dstAccessMask = VK_ACCESS_MEMORY_READ_BIT |
-		VK_ACCESS_MEMORY_WRITE_BIT;
+	release_barriers[idx].dstAccessMask = 0u; // ignored anyways
 	release_barriers[idx].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	release_barriers[idx].subresourceRange.layerCount = 1;
 	release_barriers[idx].subresourceRange.levelCount = 1;
@@ -736,9 +733,8 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 	release_stage_allocations(renderer);
 
 	// destroy pending textures
-	struct wlr_vk_texture *tex, *tmp_tex;
-	wl_list_for_each_safe(tex, tmp_tex, &renderer->destroy_textures, destroy_link) {
-		wlr_texture_destroy(&tex->wlr_texture);
+	wl_list_for_each_safe(texture, tmp_tex, &renderer->destroy_textures, destroy_link) {
+		wlr_texture_destroy(&texture->wlr_texture);
 	}
 
 	wl_list_init(&renderer->destroy_textures); // reset the list
@@ -763,9 +759,11 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 		// acquired before rendering and released after rendering.
 		// We don't do it here immediately since barriers inside
 		// a renderpass are suboptimal (would require additional renderpass
-		// dependency and potentially multiple barriers).
+		// dependency and potentially multiple barriers) and it's
+		// better to issue one barrier for all used textures anyways.
 		texture->owned = true;
-		assert(texture->foreign_link.next = NULL);
+		assert(texture->foreign_link.prev == NULL);
+		assert(texture->foreign_link.next == NULL);
 		wl_list_insert(&renderer->foreign_textures, &texture->foreign_link);
 	}
 
@@ -825,11 +823,9 @@ static void vulkan_clear(struct wlr_renderer *wlr_renderer,
 	// srgb first.
 	// But in other parts of wlroots we just always assume
 	// srgb so that's why we have to convert here.
-	// NOTE: disabled for now as we don't use sRGB textures, see
-	// https://github.com/swaywm/wlroots/pull/2771#issuecomment-821983938.
-	att.clearValue.color.float32[0] = color[0]; // color_to_linear(color[0]);
-	att.clearValue.color.float32[1] = color[1]; // color_to_linear(color[1]);
-	att.clearValue.color.float32[2] = color[2]; // color_to_linear(color[2]);
+	att.clearValue.color.float32[0] = color_to_linear(color[0]);
+	att.clearValue.color.float32[1] = color_to_linear(color[1]);
+	att.clearValue.color.float32[2] = color_to_linear(color[2]);
 	att.clearValue.color.float32[3] = color[3]; // no conversion for alpha
 
 	VkClearRect rect = {0};
@@ -889,12 +885,10 @@ static void vulkan_render_quad_with_matrix(struct wlr_renderer *wlr_renderer,
 	// does the conversion for out SRGB render targets).
 	// But in other parts of wlroots we just always assume
 	// srgb so that's why we have to convert here.
-	// NOTE: disabled for now as we don't use sRGB textures, see
-	// https://github.com/swaywm/wlroots/pull/2771#issuecomment-821983938.
 	float linear_color[4];
-	linear_color[0] = color[0]; // color_to_linear(color[0]);
-	linear_color[1] = color[1]; // color_to_linear(color[1]);
-	linear_color[2] = color[2]; // color_to_linear(color[2]);
+	linear_color[0] = color_to_linear(color[0]);
+	linear_color[1] = color_to_linear(color[1]);
+	linear_color[2] = color_to_linear(color[2]);
 	linear_color[3] = color[3]; // no conversion for alpha
 
 	vkCmdPushConstants(cb, renderer->pipe_layout,
@@ -1115,7 +1109,7 @@ static bool init_tex_pipeline(struct wlr_vk_renderer *renderer,
 	blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
 	blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 	blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
-	blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 	blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
 	blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
 	blend_attachment.colorWriteMask =
