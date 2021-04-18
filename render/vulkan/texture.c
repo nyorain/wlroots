@@ -658,17 +658,12 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 	ds_write.pImageInfo = &ds_img_info;
 
 	vkUpdateDescriptorSets(dev, 1, &ds_write, 0, NULL);
+	texture->dmabuf_imported = true;
 
-	// change layout
+	// We don't acquire the image and change its layout here immediately,
+	// better to do it collectively for all textures used in a frame.
+	/*
 	VkCommandBuffer cb = wlr_vk_record_stage_cb(renderer);
-
-	bool has_ext_queue_family_foreign = vulkan_has_extension(
-		renderer->dev->extension_count,
-		renderer->dev->extensions,
-		VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
-	unsigned queue_family_foreign = has_ext_queue_family_foreign ?
-		VK_QUEUE_FAMILY_FOREIGN_EXT : VK_QUEUE_FAMILY_EXTERNAL;
-
 	vulkan_change_layout_queue(cb, texture->image,
 		VK_IMAGE_LAYOUT_PREINITIALIZED,
 		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
@@ -676,11 +671,12 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
 		VK_ACCESS_SHADER_READ_BIT,
-		queue_family_foreign,
+		VK_QUEUE_FAMILY_FOREIGN_EXT,
 		renderer->dev->queue_family);
-	texture->last_used = renderer->frame;
-	texture->dmabuf_imported = true;
 	texture->owned = true;
+	texture->transitioned = true;
+	texture->last_used = renderer->frame;
+	*/
 
 	return &texture->wlr_texture;
 

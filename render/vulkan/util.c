@@ -59,13 +59,6 @@ void vulkan_change_layout_queue(VkCommandBuffer cb, VkImage img,
 		VkImageLayout ol, VkPipelineStageFlags srcs, VkAccessFlags srca,
 		VkImageLayout nl, VkPipelineStageFlags dsts, VkAccessFlags dsta,
 		uint32_t src_family, uint32_t dst_family) {
-	if (src_family == VK_QUEUE_FAMILY_FOREIGN_EXT) {
-		src_family = VK_QUEUE_FAMILY_EXTERNAL;
-	}
-	if (dst_family == VK_QUEUE_FAMILY_FOREIGN_EXT) {
-		dst_family = VK_QUEUE_FAMILY_EXTERNAL;
-	}
-
 	VkImageMemoryBarrier barrier = {0};
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barrier.oldLayout = ol;
