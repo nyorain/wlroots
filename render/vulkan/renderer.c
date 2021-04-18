@@ -595,13 +595,6 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 	struct wlr_vk_texture *texture;
 	unsigned idx = 0;
 
-	bool has_ext_queue_family_foreign = vulkan_has_extension(
-		renderer->dev->extension_count,
-		renderer->dev->extensions,
-		VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME);
-	unsigned queue_family_foreign = has_ext_queue_family_foreign ?
-		VK_QUEUE_FAMILY_FOREIGN_EXT : VK_QUEUE_FAMILY_EXTERNAL;
-
 	wl_list_for_each(texture, &renderer->foreign_textures, foreign_link) {
 		VkImageLayout src_layout = VK_IMAGE_LAYOUT_GENERAL;
 		if (!texture->transitioned) {
@@ -611,7 +604,7 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 
 		// acuire
 		acquire_barriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-		acquire_barriers[idx].srcQueueFamilyIndex = queue_family_foreign;
+		acquire_barriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
 		acquire_barriers[idx].dstQueueFamilyIndex = renderer->dev->queue_family;
 		acquire_barriers[idx].image = texture->image;
 		acquire_barriers[idx].oldLayout = src_layout;
@@ -626,7 +619,7 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 		// releaes
 		release_barriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		release_barriers[idx].srcQueueFamilyIndex = renderer->dev->queue_family;
-		release_barriers[idx].dstQueueFamilyIndex = queue_family_foreign;
+		release_barriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
 		release_barriers[idx].image = texture->image;
 		release_barriers[idx].oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		release_barriers[idx].newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -651,7 +644,7 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 	}
 
 	acquire_barriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	acquire_barriers[idx].srcQueueFamilyIndex = queue_family_foreign;
+	acquire_barriers[idx].srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
 	acquire_barriers[idx].dstQueueFamilyIndex = renderer->dev->queue_family;
 	acquire_barriers[idx].image = renderer->current_render_buffer->image;
 	acquire_barriers[idx].oldLayout = src_layout;
@@ -666,7 +659,7 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 
 	release_barriers[idx].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	release_barriers[idx].srcQueueFamilyIndex = renderer->dev->queue_family;
-	release_barriers[idx].dstQueueFamilyIndex = queue_family_foreign;
+	release_barriers[idx].dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
 	release_barriers[idx].image = renderer->current_render_buffer->image;
 	release_barriers[idx].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
 	release_barriers[idx].newLayout = VK_IMAGE_LAYOUT_GENERAL;

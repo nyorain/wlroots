@@ -471,7 +471,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		dev->extensions[dev->extension_count++] = exts[i];
 	}
 
-	// for dmabuf/drm importing we require at least the
+	// for dmabuf importing we require at least the
 	// 'external_memory_fd, external_memory_dma_buf, queue_family_foreign'
 	// extensions. So only enable them if all three are available (assumption
 	// throughout the codebase).
@@ -479,7 +479,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 		VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
 		VK_KHR_IMAGE_FORMAT_LIST_EXTENSION_NAME, // or vulkan 1.2
 		VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
-		// VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
+		VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME,
 		VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME,
 	};
 
@@ -493,17 +493,6 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 
 	for (unsigned i = 0u; i < nc; ++i) {
 		dev->extensions[dev->extension_count++] = names[i];
-	}
-
-	// TODO: this extension isn't optional at all, importing dmabufs
-	// isn't well-defined without it. But since the only platform
-	// I could test this on (anv with VK_EXT_image_drm_format_modifier MR)
-	// does not expose it and works fine without it, it's optional for now.
-	const char *name = VK_EXT_QUEUE_FAMILY_FOREIGN_EXTENSION_NAME;
-	if (find_extensions(avail_ext_props, avail_extc, names, nc) != NULL) {
-		dev->extensions[dev->extension_count++] = name;
-	} else {
-		wlr_log(WLR_ERROR, "vulkan: VK_EXT_queue_family_foreign not supported");
 	}
 
 	// queue families
