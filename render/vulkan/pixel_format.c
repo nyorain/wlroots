@@ -4,11 +4,15 @@
 #include <wlr/util/log.h>
 #include "render/vulkan.h"
 
-// reversed endianess of shm and vulkan format names
+// Reversed endianess of shm and vulkan format names
+// NOTE: We don't use sRGB textures and gamma-correct blending at the moment
+// to stay visually compatible with the gles2 renderer, see
+// https://github.com/swaywm/wlroots/pull/2771#issuecomment-821983938.
 static const struct wlr_vk_format formats[] = {
 	{
 		.drm_format = DRM_FORMAT_ARGB8888,
-		.vk_format = VK_FORMAT_B8G8R8A8_SRGB,
+		// .vk_format = VK_FORMAT_B8G8R8A8_SRGB,
+		.vk_format = VK_FORMAT_B8G8R8A8_UNORM,
 		.has_alpha = true,
 		.plane_count = 1,
 		.planes = {{
@@ -19,7 +23,8 @@ static const struct wlr_vk_format formats[] = {
 	},
 	{
 		.drm_format = DRM_FORMAT_XRGB8888,
-		.vk_format = VK_FORMAT_B8G8R8A8_SRGB,
+		// .vk_format = VK_FORMAT_B8G8R8A8_SRGB,
+		.vk_format = VK_FORMAT_B8G8R8A8_UNORM,
 		.has_alpha = false,
 		.plane_count = 1,
 		.planes = {{
@@ -30,7 +35,8 @@ static const struct wlr_vk_format formats[] = {
 	},
 	{
 		.drm_format = DRM_FORMAT_XBGR8888,
-		.vk_format = VK_FORMAT_R8G8B8A8_SRGB,
+		// .vk_format = VK_FORMAT_R8G8B8A8_SRGB,
+		.vk_format = VK_FORMAT_R8G8B8A8_UNORM,
 		.has_alpha = false,
 		.plane_count = 1,
 		.planes = {{
@@ -41,7 +47,8 @@ static const struct wlr_vk_format formats[] = {
 	},
 	{
 		.drm_format = DRM_FORMAT_ABGR8888,
-		.vk_format = VK_FORMAT_R8G8B8A8_SRGB,
+		// .vk_format = VK_FORMAT_R8G8B8A8_SRGB,
+		.vk_format = VK_FORMAT_R8G8B8A8_UNORM,
 		.has_alpha = true,
 		.plane_count = 1,
 		.planes = {{

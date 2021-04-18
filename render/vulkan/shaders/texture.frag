@@ -12,10 +12,12 @@ layout(push_constant) uniform UBO {
 void main() {
 	out_color = texture(tex, uv);
 
+	// we expect this shader to output pre-alpha-multiplied color values
 	if (data.alpha < 0.0) {
 		out_color.a = -data.alpha;
+		out_color.rgb *= -data.alpha;
 	} else {
-		out_color.a *= data.alpha;
+		out_color *= data.alpha;
 	}
 }
 
