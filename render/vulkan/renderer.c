@@ -8,7 +8,6 @@
 #include <unistd.h>
 #include <drm_fourcc.h>
 #include <vulkan/vulkan.h>
-#include <render/vulkan.h>
 #include <wlr/render/interface.h>
 #include <wlr/types/wlr_drm.h>
 #include <wlr/types/wlr_matrix.h>
@@ -17,6 +16,8 @@
 #include <wlr/backend/interface.h>
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
 
+#include "render/pixel_format.h"
+#include "render/vulkan.h"
 #include "render/vulkan/shaders/common.vert.h"
 #include "render/vulkan/shaders/texture.frag.h"
 #include "render/vulkan/shaders/quad.frag.h"
@@ -573,9 +574,9 @@ static void vulkan_begin(struct wlr_renderer *wlr_renderer,
 
 	// Refresh projection matrix.
 	// wlr_matrix_projection assumes a GL corrdinate system so we need
-	// to pass WL_OUTPUT_TRANSFORM_180 to adjust it for vulkan.
+	// to pass WL_OUTPUT_TRANSFORM_FLIPPED_180 to adjust it for vulkan.
 	wlr_matrix_projection(renderer->projection, width, height,
-		WL_OUTPUT_TRANSFORM_180);
+		WL_OUTPUT_TRANSFORM_FLIPPED_180);
 
 	renderer->render_width = width;
 	renderer->render_height = height;
@@ -795,7 +796,10 @@ static bool vulkan_render_subtexture_with_matrix(struct wlr_renderer *wlr_render
 	// to ignore the sampled value and just use the alpha passed here,
 	// we pass a negative value to communicate that.
 	// See the texture.frag shader for more details.
-	if (!texture->format->has_alpha) {
+	const struct wlr_pixel_format_info *format_info = drm_get_pixel_format_info(
+			texture->format->drm_format);
+	assert(format_info);
+	if (!format_info->has_alpha) {
 		alpha *= -1;
 	}
 
@@ -908,7 +912,7 @@ static const struct wlr_drm_format_set *vulkan_get_dmabuf_texture_formats(
 	return &renderer->dev->dmabuf_texture_formats;
 }
 
-static const struct wlr_drm_format_set *vulkan_get_dmabuf_render_formats(
+static const struct wlr_drm_format_set *vulkan_get_render_formats(
 		struct wlr_renderer *wlr_renderer) {
 	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
 	return &renderer->dev->dmabuf_render_formats;
@@ -1012,7 +1016,7 @@ static const struct wlr_renderer_impl renderer_impl = {
 	.resource_is_wl_drm_buffer = NULL,
 	.wl_drm_buffer_get_size = NULL,
 	.get_dmabuf_texture_formats = vulkan_get_dmabuf_texture_formats,
-	.get_dmabuf_render_formats = vulkan_get_dmabuf_render_formats,
+	.get_render_formats = vulkan_get_render_formats,
 	.preferred_read_format = vulkan_preferred_read_format,
 	.read_pixels = vulkan_read_pixels,
 	.texture_from_pixels = vulkan_texture_from_pixels,
@@ -1496,7 +1500,7 @@ error:
 	return NULL;
 }
 
-struct wlr_renderer *wlr_vk_renderer_create_from_drm_fd(int drm_fd) {
+struct wlr_renderer *wlr_vk_renderer_create_with_drm_fd(int drm_fd) {
 	wlr_log(WLR_INFO, "The vulkan renderer is only experimental and "
 		"not expected to be ready for daily use");
 

@@ -1,8 +1,7 @@
 msg = []
-if get_option('vulkan').enabled()
+if 'vulkan' in renderers
 	msg += 'Install "@0@" or pass "-Dvulkan=disabled" to disable it.'
-endif
-if not get_option('vulkan').disabled()
+else
 	msg += 'Required for vulkan renderer support.'
 endif
 

@@ -7,22 +7,14 @@
 #include <unistd.h>
 #include <wlr/render/wlr_texture.h>
 #include <wlr/util/log.h>
-#include <render/vulkan.h>
+#include "render/pixel_format.h"
+#include "render/vulkan.h"
 
 static const struct wlr_texture_impl texture_impl;
 
 struct wlr_vk_texture *vulkan_get_texture(struct wlr_texture *wlr_texture) {
 	assert(wlr_texture->impl == &texture_impl);
 	return (struct wlr_vk_texture *)wlr_texture;
-}
-
-static VkImageAspectFlagBits plane_aspect(unsigned i) {
-	switch(i) {
-		case 0: return VK_IMAGE_ASPECT_PLANE_0_BIT;
-		case 1: return VK_IMAGE_ASPECT_PLANE_1_BIT;
-		case 2: return VK_IMAGE_ASPECT_PLANE_2_BIT;
-		default: assert(false); // unreachable
-	}
 }
 
 static VkImageAspectFlagBits mem_plane_aspect(unsigned i) {
@@ -37,7 +29,10 @@ static VkImageAspectFlagBits mem_plane_aspect(unsigned i) {
 
 static bool vulkan_texture_is_opaque(struct wlr_texture *wlr_texture) {
 	struct wlr_vk_texture *texture = vulkan_get_texture(wlr_texture);
-	return !texture->format->has_alpha;
+	const struct wlr_pixel_format_info *format_info = drm_get_pixel_format_info(
+			texture->format->drm_format);
+	assert(format_info);
+	return !format_info->has_alpha;
 }
 
 static bool vulkan_texture_write_pixels(struct wlr_texture *wlr_texture,
@@ -53,25 +48,18 @@ static bool vulkan_texture_write_pixels(struct wlr_texture *wlr_texture,
 	assert(src_y + height <= texture->wlr_texture.height);
 	assert(dst_x + width <= texture->wlr_texture.width);
 	assert(dst_y + height <= texture->wlr_texture.height);
-	for (unsigned i = 0u; i < texture->format->plane_count; ++i) {
-		const struct wlr_vk_format_plane *plane = &texture->format->planes[i];
-		assert(!(dst_x % plane->hsub));
-		assert(!(dst_y % plane->vsub));
-		assert(!(width % plane->hsub));
-		assert(!(height % plane->hsub));
-	}
 
 	char *data = (char*) vdata;
+
+	const struct wlr_pixel_format_info *format_info = drm_get_pixel_format_info(
+			texture->format->drm_format);
+	assert(format_info);
 
 	// deferred upload by transfer; using staging buffer
 	// calculate maximum side needed
 	uint32_t bsize = 0;
-	for (unsigned i = 0u; i < texture->format->plane_count; ++i) {
-		const struct wlr_vk_format_plane *plane =
-			&texture->format->planes[i];
-		unsigned bytespb = plane->bpb / 8;
-		bsize += (height / plane->vsub) * (bytespb * width / plane->hsub);
-	}
+	unsigned bytespb = format_info->bpp / 8;
+	bsize += height * bytespb * width;
 
 	// get staging buffer
 	struct wlr_vk_buffer_span span = vulkan_get_stage_span(renderer, bsize);
@@ -98,60 +86,47 @@ static bool vulkan_texture_write_pixels(struct wlr_texture *wlr_texture,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
 		VK_ACCESS_TRANSFER_WRITE_BIT);
 
-	// upload each plane
-	VkBufferImageCopy copies[texture->format->plane_count];
-	for (unsigned i = 0u; i < texture->format->plane_count; ++i) {
-		const char *pdata = data; // iterator for this plane
-		const struct wlr_vk_format_plane *plane =
-			&texture->format->planes[i];
+	// upload data
+	const char *pdata = data; // data iterator
 
-		uint32_t bytespb = plane->bpb / 8;
-		uint32_t packed_stride = bytespb * width / plane->hsub;
-		uint32_t buf_off = span.alloc.start + (map - (char *)vmap);
+	uint32_t packed_stride = bytespb * width;
+	uint32_t buf_off = span.alloc.start + (map - (char *)vmap);
 
-		// write data into staging buffer span
-		pdata += (stride / plane->hsub) * (src_y / plane->vsub);
-		pdata += (bytespb * src_x / plane->hsub);
-		if (src_x == 0 && width == texture->wlr_texture.width &&
-				stride / plane->hsub == packed_stride) {
-			memcpy(map, pdata, packed_stride * (height / plane->vsub));
-			map += packed_stride * (height / plane->vsub);
-		} else {
-			for (unsigned i = 0u; i < height / plane->vsub; ++i) {
-				memcpy(map, pdata, packed_stride);
-				pdata += stride / plane->hsub;
-				map += packed_stride;
-			}
+	// write data into staging buffer span
+	pdata += stride * src_y;
+	pdata += bytespb * src_x;
+	if (src_x == 0 && width == texture->wlr_texture.width &&
+			stride == packed_stride) {
+		memcpy(map, pdata, packed_stride * height);
+		map += packed_stride * height;
+	} else {
+		for (unsigned i = 0u; i < height; ++i) {
+			memcpy(map, pdata, packed_stride);
+			pdata += stride;
+			map += packed_stride;
 		}
-
-		copies[i].imageExtent.width = width / plane->hsub;
-		copies[i].imageExtent.height = height / plane->vsub;
-		copies[i].imageExtent.depth = 1;
-		copies[i].imageOffset.x = dst_x / plane->hsub;
-		copies[i].imageOffset.y = dst_y / plane->vsub;
-		copies[i].imageOffset.z = 0;
-		copies[i].bufferOffset = buf_off;
-		copies[i].bufferRowLength = width / plane->hsub;
-		copies[i].bufferImageHeight = height / plane->vsub;
-		copies[i].imageSubresource.mipLevel = 0;
-		copies[i].imageSubresource.baseArrayLayer = 0;
-		copies[i].imageSubresource.layerCount = 1;
-		if (texture->format->plane_count == 1) {
-			copies[i].imageSubresource.aspectMask =
-				VK_IMAGE_ASPECT_COLOR_BIT;
-		} else {
-			copies[i].imageSubresource.aspectMask = plane_aspect(i);
-		}
-
-		data += (stride / plane->hsub) * (height / plane->vsub);
 	}
+
+	VkBufferImageCopy copy;
+	copy.imageExtent.width = width;
+	copy.imageExtent.height = height;
+	copy.imageExtent.depth = 1;
+	copy.imageOffset.x = dst_x;
+	copy.imageOffset.y = dst_y;
+	copy.imageOffset.z = 0;
+	copy.bufferOffset = buf_off;
+	copy.bufferRowLength = width;
+	copy.bufferImageHeight = height;
+	copy.imageSubresource.mipLevel = 0;
+	copy.imageSubresource.baseArrayLayer = 0;
+	copy.imageSubresource.layerCount = 1;
+	copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
 	assert(map - (char *)vmap == bsize);
 	vkUnmapMemory(dev, span.buffer->memory);
 
 	vkCmdCopyBufferToImage(cb, span.buffer->buffer, texture->image,
-		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-		texture->format->plane_count, copies);
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
 	vulkan_change_layout(cb, texture->image,
 		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_TRANSFER_BIT,
 		VK_ACCESS_TRANSFER_WRITE_BIT,

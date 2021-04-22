@@ -97,18 +97,9 @@ void vulkan_device_destroy(struct wlr_vk_device *dev);
 int vulkan_find_mem_type(struct wlr_vk_device *device,
 	VkMemoryPropertyFlags flags, uint32_t req_bits);
 
-struct wlr_vk_format_plane {
-	unsigned bpb; // bits per block; num_blocks_per_row = width / hsub
-	unsigned hsub; // subsampling x (horizontal)
-	unsigned vsub; // subsampling y (vertical)
-};
-
 struct wlr_vk_format {
 	uint32_t drm_format;
 	VkFormat vk_format;
-	bool has_alpha;
-	unsigned plane_count;
-	struct wlr_vk_format_plane planes[WLR_DMABUF_MAX_PLANES];
 };
 
 // Returns all known format mappings.
