@@ -1,10 +1,27 @@
-dep_vulkan = dependency('vulkan', required: 'vulkan' in renderers)
-glslang = find_program('glslangValidator', required: 'vulkan' in renderers)
+msg = []
+if get_option('vulkan').enabled()
+	msg += 'Install "@0@" or pass "-Dvulkan=disabled" to disable it.'
+endif
+if not get_option('vulkan').disabled()
+	msg += 'Required for vulkan renderer support.'
+endif
 
-# TODO: we don't really need glslang, could include the precompiled shaders
-# in repo in case this makes it easier for anyone.
-if not dep_vulkan.found() or not glslang.found()
+dep_vulkan = dependency('vulkan',
+	required: 'vulkan' in renderers,
+	not_found_message: '\n'.join(msg).format('vulkan')
+)
+
+if not dep_vulkan.found()
 	subdir_done()
+endif
+
+glslang = find_program('glslangValidator', required: false)
+if not glslang.found()
+	if 'vulkan' in renderers
+		error('\n'.join(msg).format('glslang'))
+	else
+		subdir_done()
+	endif
 endif
 
 wlr_files += files(

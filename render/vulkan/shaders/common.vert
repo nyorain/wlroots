@@ -22,5 +22,4 @@ void main() {
 	vec2 pos = values[gl_VertexIndex % 4];
 	uv = data.uv_offset + pos * data.uv_size;
 	gl_Position = data.proj * vec4(pos, 0.0, 1.0);
-	gl_Position.y = -gl_Position.y; // invert y coord for screen space
 }

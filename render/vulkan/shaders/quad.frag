@@ -8,5 +8,3 @@ layout(push_constant) uniform UBO {
 void main() {
 	out_color = data.color;
 }
-
-
