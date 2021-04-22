@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <math.h>
 #include <assert.h>
+#include <unistd.h>
 #include <xf86drm.h>
 #include <render/vulkan.h>
 #include <wlr/util/log.h>
@@ -34,9 +35,6 @@ static VkBool32 debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 		VkDebugUtilsMessageTypeFlagsEXT type,
 		const VkDebugUtilsMessengerCallbackDataEXT *debug_data,
 		void *data) {
-
-	((void) data);
-
 	// we ignore some of the non-helpful warnings
 	static const char *const ignored[] = {
 		// notifies us that shader output is not consumed since
@@ -46,22 +44,22 @@ static VkBool32 debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 
 	if (debug_data->pMessageIdName) {
 		for (unsigned i = 0; i < sizeof(ignored) / sizeof(ignored[0]); ++i) {
-			if (!strcmp(debug_data->pMessageIdName, ignored[i])) {
+			if (strcmp(debug_data->pMessageIdName, ignored[i]) == 0) {
 				return false;
 			}
 		}
 	}
 
 	enum wlr_log_importance importance;
-	switch(severity) {
-		case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
-		case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
-			importance = WLR_ERROR;
-			break;
-		default:
-		case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
-			importance = WLR_INFO;
-			break;
+	switch (severity) {
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+		importance = WLR_ERROR;
+		break;
+	default:
+	case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+		importance = WLR_INFO;
+		break;
 	}
 
 	wlr_log(importance, "%s (%s)", debug_data->pMessage,
@@ -84,10 +82,8 @@ static VkBool32 debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
 
 
 // instance
-struct wlr_vk_instance *wlr_vk_instance_create(
-		unsigned ext_count, const char **exts, bool debug,
-		const char *compositor_name, unsigned compositor_version) {
-
+struct wlr_vk_instance *vulkan_instance_create(size_t ext_count,
+		const char **exts, bool debug) {
 	// we require vulkan 1.1
 	PFN_vkEnumerateInstanceVersion pfEnumInstanceVersion =
 		(PFN_vkEnumerateInstanceVersion)
@@ -161,8 +157,6 @@ struct wlr_vk_instance *wlr_vk_instance_create(
 
 	VkApplicationInfo application_info = {0};
 	application_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-	application_info.pApplicationName = compositor_name;
-	application_info.applicationVersion = compositor_version;
 	application_info.pEngineName = "wlroots";
 	application_info.engineVersion = WLR_VERSION_NUM;
 	application_info.apiVersion = VK_API_VERSION_1_1;
@@ -254,11 +248,11 @@ struct wlr_vk_instance *wlr_vk_instance_create(
 	return ini;
 
 error:
-	wlr_vk_instance_destroy(ini);
+	vulkan_instance_destroy(ini);
 	return NULL;
 }
 
-void wlr_vk_instance_destroy(struct wlr_vk_instance *ini) {
+void vulkan_instance_destroy(struct wlr_vk_instance *ini) {
 	if (!ini) {
 		return;
 	}
@@ -278,30 +272,30 @@ void wlr_vk_instance_destroy(struct wlr_vk_instance *ini) {
 
 // physical device matching
 static void log_phdev(const VkPhysicalDeviceProperties *props) {
-	uint32_t vv_major = (props->apiVersion >> 22);
-	uint32_t vv_minor = (props->apiVersion >> 12) & 0x3ff;
-	uint32_t vv_patch = (props->apiVersion) & 0xfff;
+	uint32_t vv_major = VK_VERSION_MAJOR(props->apiVersion);
+	uint32_t vv_minor = VK_VERSION_MINOR(props->apiVersion);
+	uint32_t vv_patch = VK_VERSION_PATCH(props->apiVersion);
 
-	uint32_t dv_major = (props->driverVersion >> 22);
-	uint32_t dv_minor = (props->driverVersion >> 12) & 0x3ff;
-	uint32_t dv_patch = (props->driverVersion) & 0xfff;
+	uint32_t dv_major = VK_VERSION_MAJOR(props->driverVersion);
+	uint32_t dv_minor = VK_VERSION_MINOR(props->driverVersion);
+	uint32_t dv_patch = VK_VERSION_PATCH(props->driverVersion);
 
 	const char *dev_type = "unknown";
-	switch(props->deviceType) {
-		case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
-			dev_type = "integrated";
-			break;
-		case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
-			dev_type = "discrete";
-			break;
-		case VK_PHYSICAL_DEVICE_TYPE_CPU:
-			dev_type = "cpu";
-			break;
-		case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
-			dev_type = "gpu";
-			break;
-		default:
-			break;
+	switch (props->deviceType) {
+	case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+		dev_type = "integrated";
+		break;
+	case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+		dev_type = "discrete";
+		break;
+	case VK_PHYSICAL_DEVICE_TYPE_CPU:
+		dev_type = "cpu";
+		break;
+	case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+		dev_type = "vgpu";
+		break;
+	default:
+		break;
 	}
 
 	wlr_log(WLR_INFO, "Vulkan device: '%s'", props->deviceName);
@@ -310,20 +304,20 @@ static void log_phdev(const VkPhysicalDeviceProperties *props) {
 	wlr_log(WLR_INFO, "  Driver version: %u.%u.%u", dv_major, dv_minor, dv_patch);
 }
 
-VkPhysicalDevice wlr_vk_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd) {
+VkPhysicalDevice vulkan_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd) {
 	VkResult res;
 	uint32_t num_phdevs;
 
 	res = vkEnumeratePhysicalDevices(ini->instance, &num_phdevs, NULL);
 	if (res != VK_SUCCESS) {
-		wlr_log(WLR_ERROR, "Could not retrieve physical devices");
+		wlr_vk_error("Could not retrieve physical devices", res);
 		return VK_NULL_HANDLE;
 	}
 
 	VkPhysicalDevice phdevs[1 + num_phdevs];
 	res = vkEnumeratePhysicalDevices(ini->instance, &num_phdevs, phdevs);
 	if (res != VK_SUCCESS) {
-		wlr_log(WLR_ERROR, "Could not retrieve physical devices");
+		wlr_vk_error("Could not retrieve physical devices", res);
 		return VK_NULL_HANDLE;
 	}
 
@@ -417,16 +411,15 @@ VkPhysicalDevice wlr_vk_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd) 
 	return VK_NULL_HANDLE;
 }
 
-// device
-struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
-		VkPhysicalDevice phdev, unsigned ext_count, const char **exts) {
+struct wlr_vk_device *vulkan_device_create(struct wlr_vk_instance *ini,
+		VkPhysicalDevice phdev, size_t ext_count, const char **exts) {
 	VkResult res;
 
 	// check for extensions
 	uint32_t avail_extc = 0;
 	res = vkEnumerateDeviceExtensionProperties(phdev, NULL,
 		&avail_extc, NULL);
-	if ((res != VK_SUCCESS) || (avail_extc == 0)) {
+	if (res != VK_SUCCESS || avail_extc == 0) {
 		wlr_vk_error("Could not enumerate device extensions (1)", res);
 		return NULL;
 	}
@@ -532,7 +525,7 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	dev_info.ppEnabledExtensionNames = dev->extensions;
 
 	res = vkCreateDevice(phdev, &dev_info, NULL, &dev->dev);
-	if (res != VK_SUCCESS){
+	if (res != VK_SUCCESS) {
 		wlr_vk_error("Failed to create vulkan device", res);
 		goto error;
 	}
@@ -566,17 +559,17 @@ struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
 	}
 
 	for (unsigned i = 0u; i < max_fmts; ++i) {
-		wlr_vk_format_props_query(dev, &fmts[i]);
+		vulkan_format_props_query(dev, &fmts[i]);
 	}
 
 	return dev;
 
 error:
-	wlr_vk_device_destroy(dev);
+	vulkan_device_destroy(dev);
 	return NULL;
 }
 
-void wlr_vk_device_destroy(struct wlr_vk_device *dev) {
+void vulkan_device_destroy(struct wlr_vk_device *dev) {
 	if (!dev) {
 		return;
 	}
@@ -585,11 +578,15 @@ void wlr_vk_device_destroy(struct wlr_vk_device *dev) {
 		vkDestroyDevice(dev->dev, NULL);
 	}
 
+	if (dev->drm_fd > 0) {
+		close(dev->drm_fd);
+	}
+
 	wlr_drm_format_set_finish(&dev->dmabuf_render_formats);
 	wlr_drm_format_set_finish(&dev->dmabuf_texture_formats);
 
 	for (unsigned i = 0u; i < dev->format_prop_count; ++i) {
-		wlr_vk_format_props_finish(&dev->format_props[i]);
+		vulkan_format_props_finish(&dev->format_props[i]);
 	}
 
 	free(dev->extensions);

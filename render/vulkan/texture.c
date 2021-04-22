@@ -1,11 +1,6 @@
-#ifdef __linux__
-// http://man7.org/linux/man-pages/man2/kcmp.2.html
-#define _DEFAULT_SOURCE 1 // for syscall (for __USE_MISC)
-#include <unistd.h>
-#include <sys/syscall.h>
-#include <linux/kcmp.h>
-#endif // __linux__
+#define _POSIX_C_SOURCE 200809L
 #include <assert.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -79,7 +74,7 @@ static bool vulkan_texture_write_pixels(struct wlr_texture *wlr_texture,
 	}
 
 	// get staging buffer
-	struct wlr_vk_buffer_span span = wlr_vk_get_stage_span(renderer, bsize);
+	struct wlr_vk_buffer_span span = vulkan_get_stage_span(renderer, bsize);
 	if (!span.buffer || span.alloc.size != bsize) {
 		wlr_log(WLR_ERROR, "Failed to retrieve staging buffer");
 		return false;
@@ -96,7 +91,7 @@ static bool vulkan_texture_write_pixels(struct wlr_texture *wlr_texture,
 
 	// record staging cb
 	// will be executed before next frame
-	VkCommandBuffer cb = wlr_vk_record_stage_cb(renderer);
+	VkCommandBuffer cb = vulkan_record_stage_cb(renderer);
 	vulkan_change_layout(cb, texture->image,
 		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 		VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_ACCESS_SHADER_READ_BIT,
@@ -191,7 +186,7 @@ static void vulkan_texture_destroy(struct wlr_texture *wlr_texture) {
 
 	VkDevice dev = texture->renderer->dev->dev;
 	if (texture->ds && texture->ds_pool) {
-		wlr_vk_free_ds(texture->renderer, texture->ds_pool, texture->ds);
+		vulkan_free_ds(texture->renderer, texture->ds_pool, texture->ds);
 	}
 
 	vkDestroyImageView(dev, texture->image_view, NULL);
@@ -222,7 +217,7 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 		(const char*) &drm_fmt, width, height);
 
 	const struct wlr_vk_format_props *fmt =
-		wlr_vk_format_from_drm(renderer->dev, drm_fmt);
+		vulkan_format_props_from_drm(renderer->dev, drm_fmt);
 	if (fmt == NULL) {
 		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIx32 " (%.4s)",
 			drm_fmt, (const char*) &drm_fmt);
@@ -257,7 +252,7 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 	VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL;
 	img_info.tiling = VK_IMAGE_TILING_OPTIMAL;
 	img_info.usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-	mem_bits = wlr_vk_find_mem_type(renderer->dev,
+	mem_bits = vulkan_find_mem_type(renderer->dev,
 		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem_bits);
 	layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -311,7 +306,7 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 	}
 
 	// descriptor
-	texture->ds_pool = wlr_vk_alloc_texture_ds(renderer, &texture->ds);
+	texture->ds_pool = vulkan_alloc_texture_ds(renderer, &texture->ds);
 	if (!texture->ds_pool) {
 		wlr_log(WLR_ERROR, "failed to allocate descriptor");
 		goto error;
@@ -330,7 +325,7 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 
 	vkUpdateDescriptorSets(dev, 1, &ds_write, 0, NULL);
 
-	VkCommandBuffer cb = wlr_vk_record_stage_cb(renderer);
+	VkCommandBuffer cb = vulkan_record_stage_cb(renderer);
 	vulkan_change_layout(cb, texture->image,
 		VK_IMAGE_LAYOUT_PREINITIALIZED, VK_PIPELINE_STAGE_HOST_BIT,
 		VK_ACCESS_HOST_WRITE_BIT,
@@ -353,12 +348,11 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 		const struct wlr_dmabuf_attributes *attribs,
 		VkDeviceMemory mems[static WLR_DMABUF_MAX_PLANES], uint32_t *n_mems,
 		bool for_render) {
-
 	VkResult res;
 	VkDevice dev = renderer->dev->dev;
 	*n_mems = 0u;
 
-	struct wlr_vk_format_props *fmt = wlr_vk_format_from_drm(renderer->dev,
+	struct wlr_vk_format_props *fmt = vulkan_format_props_from_drm(renderer->dev,
 		attribs->format);
 	if (fmt == NULL) {
 		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIx32 " (%.4s)",
@@ -369,7 +363,7 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 	uint32_t plane_count = attribs->n_planes;
 	assert(plane_count < WLR_DMABUF_MAX_PLANES);
 	struct wlr_vk_format_modifier_props *mod =
-		wlr_vk_format_props_find_modifier(fmt, attribs->modifier, for_render);
+		vulkan_format_props_find_modifier(fmt, attribs->modifier, for_render);
 	if (!mod || !(mod->dmabuf_flags & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
 		wlr_log(WLR_ERROR, "Format %"PRIx32" (%.4s) can't be used with modifier "
 			"%"PRIu64, attribs->format, (const char*) &attribs->format,
@@ -391,31 +385,6 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 
 	// check if we have to create the image disjoint
 	bool disjoint = plane_count > 1;
-#ifdef __linux__
-	// kcmp only works on linux: it allows us to check whether the fds of
-	// the different planes all point to the same dmabuf (meaning the planes
-	// are not allocated in disjoint buffer), allowing us to import
-	// a single memory object even for multiple planes.
-	if (plane_count > 1) {
-		disjoint = false;
-		pid_t pid = getpid();
-		for (unsigned i = 1; i < plane_count; ++i) {
-			int ret = syscall(SYS_kcmp, pid, pid, KCMP_FILE,
-				attribs->fd[0], attribs->fd[i]);
-			if (ret < 0) { // error in system call
-				disjoint = true;
-				wlr_log_errno(WLR_ERROR, "kcmp failed");
-				break;
-			}
-
-			if (ret != 0) { // fds don't point to the same dmabuf
-				disjoint = true;
-				break;
-			}
-		}
-	}
-#endif // __linux__
-
 	if (disjoint && !(mod->props.drmFormatModifierTilingFeatures
 			& VK_FORMAT_FEATURE_DISJOINT_BIT)) {
 		wlr_log(WLR_ERROR, "Format/Modifier does not support disjoint images");
@@ -500,7 +469,7 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 		memr.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2;
 
 		renderer->dev->api.getImageMemoryRequirements2(dev, &memri, &memr);
-		int mem = wlr_vk_find_mem_type(renderer->dev, 0,
+		int mem = vulkan_find_mem_type(renderer->dev, 0,
 			memr.memoryRequirements.memoryTypeBits & fdp.memoryTypeBits);
 		if (mem < 0) {
 			wlr_log(WLR_ERROR, "no valid memory type index");
@@ -511,7 +480,11 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 		// to duplicate it since this operation does not transfer ownership
 		// of the attribs to this texture. Will be closed by vulkan on
 		// vkFreeMemory (i guess; could not find it in spec)
-		int dfd = dup(attribs->fd[i]);
+		int dfd = fcntl(attribs->fd[i], F_DUPFD_CLOEXEC, 0);
+		if (dfd < 0) {
+			wlr_log_errno(WLR_ERROR, "fcntl(F_DUPFD_CLOEXEC) failed");
+			goto error_image;
+		}
 
 		VkMemoryAllocateInfo memi = {0};
 		memi.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
@@ -579,8 +552,8 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 	wlr_log(WLR_DEBUG, "vulkan_texture_from_dmabuf: %.4s, %dx%d",
 		(const char*) &attribs->format, attribs->width, attribs->height);
 
-	struct wlr_vk_format_props *fmt = wlr_vk_format_from_drm(renderer->dev,
-		attribs->format);
+	const struct wlr_vk_format_props *fmt = vulkan_format_props_from_drm(
+		renderer->dev, attribs->format);
 	if (fmt == NULL) {
 		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIx32 " (%.4s)",
 			attribs->format, (const char*) &attribs->format);
@@ -640,7 +613,7 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 	}
 
 	// descriptor
-	texture->ds_pool = wlr_vk_alloc_texture_ds(renderer, &texture->ds);
+	texture->ds_pool = vulkan_alloc_texture_ds(renderer, &texture->ds);
 	if (!texture->ds_pool) {
 		wlr_log(WLR_ERROR, "failed to allocate descriptor");
 		goto error;
@@ -659,24 +632,6 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 
 	vkUpdateDescriptorSets(dev, 1, &ds_write, 0, NULL);
 	texture->dmabuf_imported = true;
-
-	// We don't acquire the image and change its layout here immediately,
-	// better to do it collectively for all textures used in a frame.
-	/*
-	VkCommandBuffer cb = wlr_vk_record_stage_cb(renderer);
-	vulkan_change_layout_queue(cb, texture->image,
-		VK_IMAGE_LAYOUT_PREINITIALIZED,
-		VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-		VK_ACCESS_MEMORY_WRITE_BIT,
-		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-		VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
-		VK_ACCESS_SHADER_READ_BIT,
-		VK_QUEUE_FAMILY_FOREIGN_EXT,
-		renderer->dev->queue_family);
-	texture->owned = true;
-	texture->transitioned = true;
-	texture->last_used = renderer->frame;
-	*/
 
 	return &texture->wlr_texture;
 

@@ -23,7 +23,7 @@
 #include "render/wlr_renderer.h"
 
 #if WLR_HAS_VULKAN
-	#include <wlr/render/vulkan.h>
+#include <wlr/render/vulkan.h>
 #endif
 
 void wlr_renderer_init(struct wlr_renderer *renderer,

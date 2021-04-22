@@ -18,7 +18,7 @@ struct wlr_vk_instance {
 	VkDebugUtilsMessengerEXT messenger;
 
 	// enabled extensions
-	unsigned extension_count;
+	size_t extension_count;
 	const char **extensions;
 
 	struct {
@@ -38,10 +38,9 @@ struct wlr_vk_instance {
 // The debug parameter determines if validation layers are enabled and a
 // debug messenger created.
 // `compositor_name` and `compositor_version` are passed to the vulkan driver.
-struct wlr_vk_instance *wlr_vk_instance_create(
-	unsigned ext_count, const char **exts, bool debug,
-	const char *compositor_name, unsigned compositor_version);
-void wlr_vk_instance_destroy(struct wlr_vk_instance *ini);
+struct wlr_vk_instance *vulkan_instance_create(size_t ext_count,
+	const char **exts, bool debug);
+void vulkan_instance_destroy(struct wlr_vk_instance *ini);
 
 // Logical vulkan device state.
 // Ownership can be shared by multiple renderers, reference counted
@@ -52,10 +51,10 @@ struct wlr_vk_device {
 	VkPhysicalDevice phdev;
 	VkDevice dev;
 
-	int drm_fd; // not owned
+	int drm_fd;
 
 	// enabled extensions
-	unsigned extension_count;
+	size_t extension_count;
 	const char **extensions;
 
 	// we only ever need one queue for rendering and transfer commands
@@ -82,20 +81,20 @@ struct wlr_vk_device {
 
 // Tries to find the VkPhysicalDevice for the given drm fd.
 // Might find none and return VK_NULL_HANDLE.
-VkPhysicalDevice wlr_vk_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd);
+VkPhysicalDevice vulkan_find_drm_phdev(struct wlr_vk_instance *ini, int drm_fd);
 
 // Creates a device for the given instance and physical device.
 // Will try to enable the given extensions but not fail if they are not
 // available which can later be checked by the caller.
-struct wlr_vk_device *wlr_vk_device_create(struct wlr_vk_instance *ini,
-	VkPhysicalDevice phdev, unsigned ext_count, const char **exts);
-void wlr_vk_device_destroy(struct wlr_vk_device *dev);
+struct wlr_vk_device *vulkan_device_create(struct wlr_vk_instance *ini,
+	VkPhysicalDevice phdev, size_t ext_count, const char **exts);
+void vulkan_device_destroy(struct wlr_vk_device *dev);
 
 // Tries to find any memory bit for the given vulkan device that
 // supports the given flags and is set in req_bits (e.g. if memory
 // type 2 is ok, (req_bits & (1 << 2)) must not be 0.
 // Set req_bits to 0xFFFFFFFF to allow all types.
-int wlr_vk_find_mem_type(struct wlr_vk_device *device,
+int vulkan_find_mem_type(struct wlr_vk_device *device,
 	VkMemoryPropertyFlags flags, uint32_t req_bits);
 
 struct wlr_vk_format_plane {
@@ -136,11 +135,11 @@ struct wlr_vk_format_props {
 	struct wlr_vk_format_modifier_props *texture_mods;
 };
 
-void wlr_vk_format_props_query(struct wlr_vk_device *dev,
+void vulkan_format_props_query(struct wlr_vk_device *dev,
 	const struct wlr_vk_format *format);
-struct wlr_vk_format_modifier_props *wlr_vk_format_props_find_modifier(
+struct wlr_vk_format_modifier_props *vulkan_format_props_find_modifier(
 	struct wlr_vk_format_props *props, uint64_t mod, bool render);
-void wlr_vk_format_props_finish(struct wlr_vk_format_props *props);
+void vulkan_format_props_finish(struct wlr_vk_format_props *props);
 
 // For each format we want to render, we need a separate renderpass
 // and therefore also separate pipelines.
@@ -219,32 +218,32 @@ struct wlr_vk_renderer {
 };
 
 // Creates a vulkan renderer for the given device.
-struct wlr_renderer *wlr_vk_renderer_create_for_device(struct wlr_vk_device *dev);
+struct wlr_renderer *vulkan_renderer_create_for_device(struct wlr_vk_device *dev);
 
 // stage utility - for uploading/retrieving data
 // Gets an command buffer in recording state which is guaranteed to be
 // executed before the next frame.
-VkCommandBuffer wlr_vk_record_stage_cb(struct wlr_vk_renderer *renderer);
+VkCommandBuffer vulkan_record_stage_cb(struct wlr_vk_renderer *renderer);
 
 // Submits the current stage command buffer and waits until it has
 // finished execution.
-bool wlr_vk_submit_stage_wait(struct wlr_vk_renderer *renderer);
+bool vulkan_submit_stage_wait(struct wlr_vk_renderer *renderer);
 
 // Suballocates a buffer span with the given size that can be mapped
 // and used as staging buffer. The allocation is implicitly released when the
 // stage cb has finished execution.
-struct wlr_vk_buffer_span wlr_vk_get_stage_span(
+struct wlr_vk_buffer_span vulkan_get_stage_span(
 	struct wlr_vk_renderer *renderer, VkDeviceSize size);
 
 // Tries to allocate a texture descriptor set. Will additionally
 // return the pool it was allocated from when successful (for freeing it later).
-struct wlr_vk_descriptor_pool *wlr_vk_alloc_texture_ds(
+struct wlr_vk_descriptor_pool *vulkan_alloc_texture_ds(
 	struct wlr_vk_renderer *renderer, VkDescriptorSet *ds);
 
 // Frees the given descriptor set from the pool its pool.
-void wlr_vk_free_ds(struct wlr_vk_renderer *renderer,
+void vulkan_free_ds(struct wlr_vk_renderer *renderer,
 	struct wlr_vk_descriptor_pool *pool, VkDescriptorSet ds);
-struct wlr_vk_format_props *wlr_vk_format_from_drm(
+struct wlr_vk_format_props *vulkan_format_props_from_drm(
 	struct wlr_vk_device *dev, uint32_t drm_format);
 struct wlr_vk_renderer *vulkan_get_renderer(struct wlr_renderer *r);
 
@@ -311,7 +310,7 @@ struct wlr_vk_buffer_span {
 };
 
 // util
-bool vulkan_has_extension(unsigned count, const char **exts, const char *find);
+bool vulkan_has_extension(size_t count, const char **exts, const char *find);
 const char *vulkan_strerror(VkResult err);
 void vulkan_change_layout(VkCommandBuffer cb, VkImage img,
 	VkImageLayout ol, VkPipelineStageFlags srcs, VkAccessFlags srca,

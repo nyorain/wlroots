@@ -1,7 +1,9 @@
+#define _POSIX_C_SOURCE 200809L
+#include <assert.h>
+#include <fcntl.h>
+#include <math.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <math.h>
-#include <assert.h>
 #include <sys/types.h>
 #include <unistd.h>
 #include <drm_fourcc.h>
@@ -15,9 +17,9 @@
 #include <wlr/backend/interface.h>
 #include <wlr/types/wlr_linux_dmabuf_v1.h>
 
-#include <render/vulkan/shaders/common.vert.h>
-#include <render/vulkan/shaders/texture.frag.h>
-#include <render/vulkan/shaders/quad.frag.h>
+#include "render/vulkan/shaders/common.vert.h"
+#include "render/vulkan/shaders/texture.frag.h"
+#include "render/vulkan/shaders/quad.frag.h"
 
 // TODO:
 // - simplify stage allocation, don't track allocations but use ringbuffer-like
@@ -74,7 +76,7 @@ static void mat3_to_mat4(const float mat3[9], float mat4[4][4]) {
 	mat4[3][3] = 1.f;
 }
 
-struct wlr_vk_descriptor_pool *wlr_vk_alloc_texture_ds(
+struct wlr_vk_descriptor_pool *vulkan_alloc_texture_ds(
 		struct wlr_vk_renderer *renderer, VkDescriptorSet *ds) {
 	VkResult res;
 	VkDescriptorSetAllocateInfo ds_info = {0};
@@ -137,7 +139,7 @@ struct wlr_vk_descriptor_pool *wlr_vk_alloc_texture_ds(
 	return pool;
 }
 
-void wlr_vk_free_ds(struct wlr_vk_renderer *renderer,
+void vulkan_free_ds(struct wlr_vk_renderer *renderer,
 		struct wlr_vk_descriptor_pool *pool, VkDescriptorSet ds) {
 	vkFreeDescriptorSets(renderer->dev->dev, pool->pool, 1, &ds);
 	++pool->free;
@@ -185,7 +187,7 @@ static void release_stage_allocations(struct wlr_vk_renderer *renderer) {
 	}
 }
 
-struct wlr_vk_buffer_span wlr_vk_get_stage_span(struct wlr_vk_renderer *r,
+struct wlr_vk_buffer_span vulkan_get_stage_span(struct wlr_vk_renderer *r,
 		VkDeviceSize size) {
 	// try to find free span
 	// simple greedy allocation algorithm - should be enough for this usecase
@@ -268,7 +270,7 @@ struct wlr_vk_buffer_span wlr_vk_get_stage_span(struct wlr_vk_renderer *r,
 	VkMemoryAllocateInfo mem_info = {0};
 	mem_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	mem_info.allocationSize = mem_reqs.size;
-	mem_info.memoryTypeIndex = wlr_vk_find_mem_type(r->dev,
+	mem_info.memoryTypeIndex = vulkan_find_mem_type(r->dev,
 		VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
 		VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, mem_reqs.memoryTypeBits);
 	res = vkAllocateMemory(r->dev->dev, &mem_info, NULL, &buf->memory);
@@ -313,7 +315,7 @@ error_alloc:
 	};
 }
 
-VkCommandBuffer wlr_vk_record_stage_cb(struct wlr_vk_renderer *renderer) {
+VkCommandBuffer vulkan_record_stage_cb(struct wlr_vk_renderer *renderer) {
 	if (!renderer->stage.recording) {
 		VkCommandBufferBeginInfo begin_info = {0};
 		begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -324,7 +326,7 @@ VkCommandBuffer wlr_vk_record_stage_cb(struct wlr_vk_renderer *renderer) {
 	return renderer->stage.cb;
 }
 
-bool wlr_vk_submit_stage_wait(struct wlr_vk_renderer *renderer) {
+bool vulkan_submit_stage_wait(struct wlr_vk_renderer *renderer) {
 	if (!renderer->stage.recording) {
 		return false;
 	}
@@ -361,7 +363,7 @@ bool wlr_vk_submit_stage_wait(struct wlr_vk_renderer *renderer) {
 	return true;
 }
 
-struct wlr_vk_format_props *wlr_vk_format_from_drm(
+struct wlr_vk_format_props *vulkan_format_props_from_drm(
 		struct wlr_vk_device *dev, uint32_t drm_fmt) {
 	for (size_t i = 0u; i < dev->format_prop_count; ++i) {
 		if (dev->format_props[i].format.drm_format == drm_fmt) {
@@ -444,8 +446,8 @@ static struct wlr_vk_render_buffer *create_render_buffer(
 	}
 
 	VkDevice dev = renderer->dev->dev;
-	struct wlr_vk_format_props *fmt = wlr_vk_format_from_drm(renderer->dev,
-		dmabuf.format);
+	const struct wlr_vk_format_props *fmt = vulkan_format_props_from_drm(
+		renderer->dev, dmabuf.format);
 	if (fmt == NULL) {
 		wlr_log(WLR_ERROR, "Unsupported pixel format %"PRIx32 " (%.4s)",
 			dmabuf.format, (const char*) &dmabuf.format);
@@ -569,9 +571,11 @@ static void vulkan_begin(struct wlr_renderer *wlr_renderer,
 	vkCmdSetViewport(cb, 0, 1, &vp);
 	vkCmdSetScissor(cb, 0, 1, &rect);
 
-	// refresh projection matrix
+	// Refresh projection matrix.
+	// wlr_matrix_projection assumes a GL corrdinate system so we need
+	// to pass WL_OUTPUT_TRANSFORM_180 to adjust it for vulkan.
 	wlr_matrix_projection(renderer->projection, width, height,
-		WL_OUTPUT_TRANSFORM_NORMAL);
+		WL_OUTPUT_TRANSFORM_180);
 
 	renderer->render_width = width;
 	renderer->render_height = height;
@@ -584,7 +588,7 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 	assert(renderer->current_render_buffer);
 
 	VkCommandBuffer render_cb = renderer->cb;
-	VkCommandBuffer pre_cb = wlr_vk_record_stage_cb(renderer);
+	VkCommandBuffer pre_cb = vulkan_record_stage_cb(renderer);
 
 	renderer->render_width = 0u;
 	renderer->render_height = 0u;
@@ -594,10 +598,8 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 
 	// insert acquire and release barriers for dmabuf-images
 	unsigned barrier_count = wl_list_length(&renderer->foreign_textures) + 1;
-	VkImageMemoryBarrier acquire_barriers[barrier_count];
-	VkImageMemoryBarrier release_barriers[barrier_count];
-	memset(acquire_barriers, 0, sizeof(VkImageMemoryBarrier) * barrier_count);
-	memset(release_barriers, 0, sizeof(VkImageMemoryBarrier) * barrier_count);
+	VkImageMemoryBarrier* acquire_barriers = calloc(barrier_count, sizeof(VkImageMemoryBarrier));
+	VkImageMemoryBarrier* release_barriers = calloc(barrier_count, sizeof(VkImageMemoryBarrier));
 
 	struct wlr_vk_texture *texture, *tmp_tex;
 	unsigned idx = 0;
@@ -636,11 +638,9 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 		release_barriers[idx].subresourceRange.levelCount = 1;
 		++idx;
 
-		texture->foreign_link.next = texture->foreign_link.prev = NULL;
+		wl_list_remove(&texture->foreign_link);
 		texture->owned = false;
 	}
-
-	wl_list_init(&renderer->foreign_textures); // clear list
 
 	// also add acquire/release barriers for the current render buffer
 	VkImageLayout src_layout = VK_IMAGE_LAYOUT_GENERAL;
@@ -685,6 +685,9 @@ static void vulkan_end(struct wlr_renderer *wlr_renderer) {
 	vkCmdPipelineBarrier(render_cb, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
 		VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, NULL, 0, NULL,
 		barrier_count, release_barriers);
+
+	free(acquire_barriers);
+	free(release_barriers);
 
 	vkEndCommandBuffer(renderer->cb);
 
@@ -963,8 +966,8 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 	vkDestroyCommandPool(dev->dev, renderer->command_pool, NULL);
 
 	struct wlr_vk_instance *ini = dev->instance;
-	wlr_vk_device_destroy(dev);
-	wlr_vk_instance_destroy(ini);
+	vulkan_device_destroy(dev);
+	vulkan_instance_destroy(ini);
 	free(renderer);
 }
 
@@ -1239,7 +1242,6 @@ static bool init_static_render_data(struct wlr_vk_renderer *renderer) {
 
 static struct wlr_vk_render_format_setup *find_or_create_render_setup(
 		struct wlr_vk_renderer *renderer, VkFormat format) {
-
 	struct wlr_vk_render_format_setup *setup;
 	wl_list_for_each(setup, &renderer->render_format_setups, link) {
 		if (setup->render_format == format) {
@@ -1421,7 +1423,7 @@ error:
 	return NULL;
 }
 
-struct wlr_renderer *wlr_vk_renderer_create_for_device(struct wlr_vk_device *dev) {
+struct wlr_renderer *vulkan_renderer_create_for_device(struct wlr_vk_device *dev) {
 	struct wlr_vk_renderer *renderer;
 	VkResult res;
 	if (!(renderer = calloc(1, sizeof(*renderer)))) {
@@ -1495,34 +1497,23 @@ error:
 }
 
 struct wlr_renderer *wlr_vk_renderer_create_from_drm_fd(int drm_fd) {
-	VkResult res;
 	wlr_log(WLR_INFO, "The vulkan renderer is only experimental and "
 		"not expected to be ready for daily use");
 
 	// NOTE: we could add functionality to allow the compositor passing its
 	// name and version to this function. Just use dummies until then,
 	// shouldn't be relevant to the driver anyways
-	struct wlr_vk_instance *ini = wlr_vk_instance_create(0, NULL,
-		default_debug, "wlroots-compositor", 0);
+	struct wlr_vk_instance *ini = vulkan_instance_create(0, NULL, default_debug);
 	if (!ini) {
 		wlr_log(WLR_ERROR, "creating vulkan instance for renderer failed");
 		return NULL;
 	}
 
-	VkPhysicalDevice phdev = wlr_vk_find_drm_phdev(ini, drm_fd);
+	VkPhysicalDevice phdev = vulkan_find_drm_phdev(ini, drm_fd);
 	if (!phdev) {
-		// NOTE: could simply fail renderer creation here (especially
-		// when there is more than one vulkan device, this will very likely
-		// fail).
-		wlr_log(WLR_ERROR, "Could not match drm and vulkan device, just "
-			"trying to use the first available vulkan device");
-		uint32_t num_devs = 1;
-		res = vkEnumeratePhysicalDevices(ini->instance, &num_devs, &phdev);
-		if (res != VK_SUCCESS && res != VK_INCOMPLETE) {
-			wlr_log(WLR_ERROR, "Could not retrieve physical device");
-			free(ini);
-			return NULL;
-		}
+		// We rather fail here than doing some guesswork
+		wlr_log(WLR_ERROR, "Could not match drm and vulkan device");
+		return NULL;
 	}
 
 	// queue families
@@ -1532,13 +1523,21 @@ struct wlr_renderer *wlr_vk_renderer_create_from_drm_fd(int drm_fd) {
 	vkGetPhysicalDeviceQueueFamilyProperties(phdev, &qfam_count,
 		queue_props);
 
-	struct wlr_vk_device *dev = wlr_vk_device_create(ini, phdev, 0, NULL);
+	struct wlr_vk_device *dev = vulkan_device_create(ini, phdev, 0, NULL);
 	if (!dev) {
 		wlr_log(WLR_ERROR, "Failed to create vulkan device");
-		free(ini);
+		vulkan_instance_destroy(ini);
 		return NULL;
 	}
 
-	dev->drm_fd = drm_fd;
-	return wlr_vk_renderer_create_for_device(dev);
+	// We duplicate it so it's not closed while we still need it.
+	dev->drm_fd = fcntl(drm_fd, F_DUPFD_CLOEXEC, 0);
+	if (dev->drm_fd < 0) {
+		wlr_log_errno(WLR_ERROR, "fcntl(F_DUPFD_CLOEXEC) failed");
+		vulkan_device_destroy(dev);
+		vulkan_instance_destroy(ini);
+		return NULL;
+	}
+
+	return vulkan_renderer_create_for_device(dev);
 }
