@@ -38,16 +38,29 @@ const struct wlr_vk_format *vulkan_get_format_from_drm(uint32_t drm_format) {
 	return NULL;
 }
 
-static const VkImageUsageFlags render_usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-static const VkImageUsageFlags tex_usage = VK_IMAGE_USAGE_SAMPLED_BIT |
+static const VkImageUsageFlags render_usage =
+	VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+static const VkImageUsageFlags tex_usage =
+	VK_IMAGE_USAGE_SAMPLED_BIT |
 	VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-static const VkImageUsageFlags dma_tex_usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+static const VkImageUsageFlags dma_tex_usage =
+	VK_IMAGE_USAGE_SAMPLED_BIT;
 
-static const VkFormatFeatureFlags tex_features = VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
+static const VkFormatFeatureFlags tex_features =
+	VK_FORMAT_FEATURE_TRANSFER_SRC_BIT |
 	VK_FORMAT_FEATURE_TRANSFER_DST_BIT |
-	VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
-static const VkFormatFeatureFlags render_features = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT;
-static const VkFormatFeatureFlags dma_tex_features = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+	VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+	// NOTE: we don't strictly require this, we could create a NEAREST
+	// sampler for formats that need it, in case this ever makes problems.
+	VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+static const VkFormatFeatureFlags render_features =
+	VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+	VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT;
+static const VkFormatFeatureFlags dma_tex_features =
+	VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+	// NOTE: we don't strictly require this, we could create a NEAREST
+	// sampler for formats that need it, in case this ever makes problems.
+	VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
 
 static bool query_modifier_support(struct wlr_vk_device *dev,
 		struct wlr_vk_format_props *props, size_t modifier_count,
@@ -121,11 +134,12 @@ static bool query_modifier_support(struct wlr_vk_device *dev,
 	for (unsigned i = 0u; i < modp.drmFormatModifierCount; ++i) {
 		VkDrmFormatModifierPropertiesEXT m =
 			modp.pDrmFormatModifierProperties[i];
-		wlr_log(WLR_DEBUG, "  modifier: 0x%"PRIx64 ": features 0x%"PRIx32,
-			m.drmFormatModifier, m.drmFormatModifierTilingFeatures);
+		wlr_log(WLR_DEBUG, "  modifier: 0x%"PRIx64 ": features 0x%"PRIx32", %d planes",
+			m.drmFormatModifier, m.drmFormatModifierTilingFeatures,
+			m.drmFormatModifierPlaneCount);
 
 		// check that specific modifier for render usage
-		if (m.drmFormatModifierTilingFeatures & render_features) {
+		if ((m.drmFormatModifierTilingFeatures & render_features) == render_features) {
 			fmti.usage = render_usage;
 
 			modi.drmFormatModifier = m.drmFormatModifier;
@@ -138,8 +152,8 @@ static bool query_modifier_support(struct wlr_vk_device *dev,
 				}
 
 				wlr_log(WLR_DEBUG, "    >> rendering: format not supported");
-			} else if ((emp->externalMemoryFeatures &
-					VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
+			} else if (emp->externalMemoryFeatures &
+					VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) {
 				unsigned c = props->render_mod_count;
 				VkExtent3D me = ifmtp.imageFormatProperties.maxExtent;
 				VkExternalMemoryProperties emp = efmtp.externalMemoryProperties;
@@ -165,7 +179,7 @@ static bool query_modifier_support(struct wlr_vk_device *dev,
 		}
 
 		// check that specific modifier for texture usage
-		if (m.drmFormatModifierTilingFeatures & dma_tex_features) {
+		if ((m.drmFormatModifierTilingFeatures & dma_tex_features) == dma_tex_features) {
 			fmti.usage = dma_tex_usage;
 
 			modi.drmFormatModifier = m.drmFormatModifier;
@@ -178,8 +192,8 @@ static bool query_modifier_support(struct wlr_vk_device *dev,
 				}
 
 				wlr_log(WLR_DEBUG, "    >> dmatex: format not supported");
-			} else if ((emp->externalMemoryFeatures &
-					VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
+			} else if (emp->externalMemoryFeatures &
+					VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT) {
 				unsigned c = props->texture_mod_count;
 				VkExtent3D me = ifmtp.imageFormatProperties.maxExtent;
 				VkExternalMemoryProperties emp = efmtp.externalMemoryProperties;

@@ -327,6 +327,10 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 	VkDevice dev = renderer->dev->dev;
 	*n_mems = 0u;
 
+	wlr_log(WLR_DEBUG, "vulkan_import_dmabuf: %.4s (mod %"PRIx64"), %dx%d, %d planes",
+		(const char *)&attribs->format, attribs->modifier,
+		attribs->width, attribs->height, attribs->n_planes);
+
 	struct wlr_vk_format_props *fmt = vulkan_format_props_from_drm(renderer->dev,
 		attribs->format);
 	if (fmt == NULL) {
@@ -341,7 +345,7 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 		vulkan_format_props_find_modifier(fmt, attribs->modifier, for_render);
 	if (!mod || !(mod->dmabuf_flags & VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT)) {
 		wlr_log(WLR_ERROR, "Format %"PRIx32" (%.4s) can't be used with modifier "
-			"%"PRIu64, attribs->format, (const char*) &attribs->format,
+			"%"PRIx64, attribs->format, (const char*) &attribs->format,
 			attribs->modifier);
 		return VK_NULL_HANDLE;
 	}
@@ -359,7 +363,8 @@ VkImage vulkan_import_dmabuf(struct wlr_vk_renderer *renderer,
 	}
 
 	// check if we have to create the image disjoint
-	bool disjoint = plane_count > 1;
+	bool disjoint = (plane_count > 1);
+
 	if (disjoint && !(mod->props.drmFormatModifierTilingFeatures
 			& VK_FORMAT_FEATURE_DISJOINT_BIT)) {
 		wlr_log(WLR_ERROR, "Format/Modifier does not support disjoint images");
@@ -523,9 +528,6 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 
 	VkResult res;
 	VkDevice dev = renderer->dev->dev;
-
-	wlr_log(WLR_DEBUG, "vulkan_texture_from_dmabuf: %.4s, %dx%d",
-		(const char*) &attribs->format, attribs->width, attribs->height);
 
 	const struct wlr_vk_format_props *fmt = vulkan_format_props_from_drm(
 		renderer->dev, attribs->format);
