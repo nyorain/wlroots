@@ -22,10 +22,6 @@
 #include "render/pixel_format.h"
 #include "render/wlr_renderer.h"
 
-#if WLR_HAS_VULKAN
-#include <wlr/render/vulkan.h>
-#endif
-
 void wlr_renderer_init(struct wlr_renderer *renderer,
 		const struct wlr_renderer_impl *impl) {
 	assert(impl->begin);
@@ -244,7 +240,7 @@ struct wlr_renderer *wlr_renderer_autocreate_with_drm_fd(int drm_fd) {
 #endif
 #if WLR_HAS_VULKAN_RENDERER
 		if (strcmp(name, "vulkan") == 0) {
-			return wlr_vulkan_renderer_create_with_drm_fd(drm_fd);
+			return wlr_vk_renderer_create_with_drm_fd(drm_fd);
 		}
 #endif
 		if (strcmp(name, "pixman") == 0) {

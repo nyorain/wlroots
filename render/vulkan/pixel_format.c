@@ -9,46 +9,18 @@ static const struct wlr_vk_format formats[] = {
 	{
 		.drm_format = DRM_FORMAT_ARGB8888,
 		.vk_format = VK_FORMAT_B8G8R8A8_SRGB,
-		.has_alpha = true,
-		.plane_count = 1,
-		.planes = {{
-			.bpb = 32,
-			.hsub = 1,
-			.vsub = 1,
-		}},
 	},
 	{
 		.drm_format = DRM_FORMAT_XRGB8888,
 		.vk_format = VK_FORMAT_B8G8R8A8_SRGB,
-		.has_alpha = false,
-		.plane_count = 1,
-		.planes = {{
-			.bpb = 32,
-			.hsub = 1,
-			.vsub = 1,
-		}},
 	},
 	{
 		.drm_format = DRM_FORMAT_XBGR8888,
 		.vk_format = VK_FORMAT_R8G8B8A8_SRGB,
-		.has_alpha = false,
-		.plane_count = 1,
-		.planes = {{
-			.bpb = 32,
-			.hsub = 1,
-			.vsub = 1,
-		}},
 	},
 	{
 		.drm_format = DRM_FORMAT_ABGR8888,
 		.vk_format = VK_FORMAT_R8G8B8A8_SRGB,
-		.has_alpha = true,
-		.plane_count = 1,
-		.planes = {{
-			.bpb = 32,
-			.hsub = 1,
-			.vsub = 1,
-		}},
 	},
 };
 
@@ -87,12 +59,13 @@ static bool query_modifier_support(struct wlr_vk_device *dev,
 
 	VkDrmFormatModifierPropertiesListEXT modp = {0};
 	modp.sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT;
+	modp.drmFormatModifierCount = modifier_count;
 	fmtp.pNext = &modp;
 
 	// the first call to vkGetPhysicalDeviceFormatProperties2 did only
 	// retrieve the number of modifiers, we now have to retrieve
 	// the modifiers
-	modp.pDrmFormatModifierProperties = calloc(modp.drmFormatModifierCount,
+	modp.pDrmFormatModifierProperties = calloc(modifier_count,
 		sizeof(*modp.pDrmFormatModifierProperties));
 	if (!modp.pDrmFormatModifierProperties) {
 		wlr_log_errno(WLR_ERROR, "Allocation failed");

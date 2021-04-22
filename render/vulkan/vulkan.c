@@ -4,11 +4,11 @@
 #include <assert.h>
 #include <unistd.h>
 #include <xf86drm.h>
-#include <render/vulkan.h>
+#include <vulkan/vulkan.h>
 #include <wlr/util/log.h>
 #include <wlr/version.h>
 #include <wlr/config.h>
-#include <vulkan/vulkan.h>
+#include "render/vulkan.h"
 
 // Returns the name of the first extension that could not be found or NULL.
 static const char *find_extensions(const VkExtensionProperties *avail,
