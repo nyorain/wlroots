@@ -21,6 +21,7 @@
 #include "render/vulkan/shaders/common.vert.h"
 #include "render/vulkan/shaders/texture.frag.h"
 #include "render/vulkan/shaders/quad.frag.h"
+#include "types/wlr_buffer.h"
 
 // TODO:
 // - simplify stage allocation, don't track allocations but use ringbuffer-like
@@ -959,6 +960,11 @@ static void vulkan_destroy(struct wlr_renderer *wlr_renderer) {
 		destroy_render_buffer(render_buffer);
 	}
 
+	struct wlr_vk_texture *tex, *tex_tmp;
+	wl_list_for_each_safe(tex, tex_tmp, &renderer->textures, link) {
+		vulkan_texture_destroy(tex);
+	}
+
 	vkDestroyShaderModule(dev->dev, renderer->vert_module, NULL);
 	vkDestroyShaderModule(dev->dev, renderer->tex_frag_module, NULL);
 	vkDestroyShaderModule(dev->dev, renderer->quad_frag_module, NULL);
@@ -1004,6 +1010,10 @@ static bool vulkan_init_wl_display(struct wlr_renderer *wlr_renderer,
 	return true;
 }
 
+static uint32_t vulkan_get_render_buffer_caps(struct wlr_renderer *wlr_renderer) {
+	return WLR_BUFFER_CAP_DMABUF;
+}
+
 static const struct wlr_renderer_impl renderer_impl = {
 	.bind_buffer = vulkan_bind_buffer,
 	.begin = vulkan_begin,
@@ -1025,6 +1035,8 @@ static const struct wlr_renderer_impl renderer_impl = {
 	.destroy = vulkan_destroy,
 	.init_wl_display = vulkan_init_wl_display,
 	.get_drm_fd = vulkan_get_drm_fd,
+	.get_render_buffer_caps = vulkan_get_render_buffer_caps,
+	.texture_from_buffer = vulkan_texture_from_buffer,
 };
 
 // Initializes the VkDescriptorSetLayout and VkPipelineLayout needed
@@ -1440,6 +1452,7 @@ struct wlr_renderer *vulkan_renderer_create_for_device(struct wlr_vk_device *dev
 	wl_list_init(&renderer->stage.buffers);
 	wl_list_init(&renderer->destroy_textures);
 	wl_list_init(&renderer->foreign_textures);
+	wl_list_init(&renderer->textures);
 	wl_list_init(&renderer->descriptor_pools);
 	wl_list_init(&renderer->render_format_setups);
 	wl_list_init(&renderer->render_buffers);

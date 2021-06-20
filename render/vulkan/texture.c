@@ -9,6 +9,7 @@
 #include <wlr/util/log.h>
 #include "render/pixel_format.h"
 #include "render/vulkan.h"
+#include "types/wlr_buffer.h"
 
 static const struct wlr_texture_impl texture_impl;
 
@@ -137,12 +138,7 @@ static bool vulkan_texture_write_pixels(struct wlr_texture *wlr_texture,
 	return true;
 }
 
-static void vulkan_texture_destroy(struct wlr_texture *wlr_texture) {
-	if (wlr_texture == NULL) {
-		return;
-	}
-
-	struct wlr_vk_texture *texture = vulkan_get_texture(wlr_texture);
+void vulkan_texture_destroy(struct wlr_vk_texture *texture) {
 	if (!texture->renderer) {
 		free(texture);
 		return;
@@ -159,6 +155,9 @@ static void vulkan_texture_destroy(struct wlr_texture *wlr_texture) {
 		return;
 	}
 
+	wl_list_remove(&texture->link);
+	wl_list_remove(&texture->buffer_destroy.link);
+
 	VkDevice dev = texture->renderer->dev->dev;
 	if (texture->ds && texture->ds_pool) {
 		vulkan_free_ds(texture->renderer, texture->ds_pool, texture->ds);
@@ -174,11 +173,37 @@ static void vulkan_texture_destroy(struct wlr_texture *wlr_texture) {
 	free(texture);
 }
 
+static void vulkan_texture_unref(struct wlr_texture *wlr_texture) {
+	struct wlr_vk_texture *texture = vulkan_get_texture(wlr_texture);
+	if (texture->buffer != NULL) {
+		// Keep the texture around, in case the buffer is re-used later. We're
+		// still listening to the buffer's destroy event.
+		wlr_buffer_unlock(texture->buffer);
+	} else {
+		vulkan_texture_destroy(texture);
+	}
+}
+
 static const struct wlr_texture_impl texture_impl = {
 	.is_opaque = vulkan_texture_is_opaque,
 	.write_pixels = vulkan_texture_write_pixels,
-	.destroy = vulkan_texture_destroy,
+	.destroy = vulkan_texture_unref,
 };
+
+static struct wlr_vk_texture *vulkan_texture_create(
+		struct wlr_vk_renderer *renderer, uint32_t width, uint32_t height) {
+	struct wlr_vk_texture *texture =
+		calloc(1, sizeof(struct wlr_vk_texture));
+	if (texture == NULL) {
+		wlr_log_errno(WLR_ERROR, "Allocation failed");
+		return NULL;
+	}
+	wlr_texture_init(&texture->wlr_texture, &texture_impl, width, height);
+	texture->renderer = renderer;
+	wl_list_insert(&renderer->textures, &texture->link);
+	wl_list_init(&texture->buffer_destroy.link);
+	return texture;
+}
 
 struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer,
 		uint32_t drm_fmt, uint32_t stride, uint32_t width,
@@ -199,17 +224,14 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 		return NULL;
 	}
 
-	struct wlr_vk_texture *texture = calloc(1, sizeof(struct wlr_vk_texture));
+	struct wlr_vk_texture *texture = vulkan_texture_create(renderer, width, height);
 	if (texture == NULL) {
-		wlr_log(WLR_ERROR, "Allocation failed");
 		return NULL;
 	}
 
-	wlr_texture_init(&texture->wlr_texture, &texture_impl, width, height);
-	texture->renderer = renderer;
 	texture->format = &fmt->format;
 
-	// image
+	// create image
 	unsigned mem_bits = 0xFFFFFFFF;
 
 	VkImageCreateInfo img_info = {0};
@@ -315,7 +337,7 @@ struct wlr_texture *vulkan_texture_from_pixels(struct wlr_renderer *wlr_renderer
 	return &texture->wlr_texture;
 
 error:
-	vulkan_texture_destroy(&texture->wlr_texture);
+	vulkan_texture_destroy(texture);
 	return NULL;
 }
 
@@ -537,18 +559,13 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 		return NULL;
 	}
 
-	struct wlr_vk_texture *texture = calloc(1, sizeof(struct wlr_vk_texture));
+	struct wlr_vk_texture *texture = vulkan_texture_create(renderer,
+		attribs->width, attribs->height);
 	if (texture == NULL) {
-		wlr_log(WLR_ERROR, "Allocation failed");
 		return NULL;
 	}
 
-	wlr_texture_init(&texture->wlr_texture, &texture_impl,
-		attribs->width, attribs->height);
-
-	texture->renderer = renderer;
 	texture->format = &fmt->format;
-
 	texture->image = vulkan_import_dmabuf(renderer, attribs,
 		texture->memories, &texture->mem_count, false);
 	if (!texture->image) {
@@ -613,6 +630,60 @@ struct wlr_texture *vulkan_texture_from_dmabuf(struct wlr_renderer *wlr_renderer
 	return &texture->wlr_texture;
 
 error:
-	vulkan_texture_destroy(&texture->wlr_texture);
+	vulkan_texture_destroy(texture);
 	return NULL;
+}
+
+static void texture_handle_buffer_destroy(struct wl_listener *listener,
+		void *data) {
+	struct wlr_vk_texture *texture =
+		wl_container_of(listener, texture, buffer_destroy);
+	vulkan_texture_destroy(texture);
+}
+
+static struct wlr_texture *vulkan_texture_from_dmabuf_buffer(
+		struct wlr_vk_renderer *renderer, struct wlr_buffer *buffer,
+		struct wlr_dmabuf_attributes *dmabuf) {
+	struct wlr_vk_texture *texture;
+	wl_list_for_each(texture, &renderer->textures, link) {
+		if (texture->buffer == buffer) {
+			wlr_buffer_lock(texture->buffer);
+			return &texture->wlr_texture;
+		}
+	}
+
+	struct wlr_texture *wlr_texture =
+		vulkan_texture_from_dmabuf(&renderer->wlr_renderer, dmabuf);
+	if (wlr_texture == NULL) {
+		return false;
+	}
+
+	texture = vulkan_get_texture(wlr_texture);
+	texture->buffer = wlr_buffer_lock(buffer);
+
+	texture->buffer_destroy.notify = texture_handle_buffer_destroy;
+	wl_signal_add(&buffer->events.destroy, &texture->buffer_destroy);
+
+	return &texture->wlr_texture;
+}
+
+struct wlr_texture *vulkan_texture_from_buffer(
+		struct wlr_renderer *wlr_renderer,
+		struct wlr_buffer *buffer) {
+	struct wlr_vk_renderer *renderer = vulkan_get_renderer(wlr_renderer);
+
+	void *data;
+	uint32_t format;
+	size_t stride;
+	struct wlr_dmabuf_attributes dmabuf;
+	if (wlr_buffer_get_dmabuf(buffer, &dmabuf)) {
+		return vulkan_texture_from_dmabuf_buffer(renderer, buffer, &dmabuf);
+	} else if (buffer_begin_data_ptr_access(buffer, &data, &format, &stride)) {
+		struct wlr_texture *tex = vulkan_texture_from_pixels(wlr_renderer,
+			format, stride, buffer->width, buffer->height, data);
+		buffer_end_data_ptr_access(buffer);
+		return tex;
+	} else {
+		return NULL;
+	}
 }
