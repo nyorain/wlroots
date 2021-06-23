@@ -123,7 +123,7 @@ static bool vulkan_texture_write_pixels(struct wlr_texture *wlr_texture,
 	copy.imageSubresource.layerCount = 1;
 	copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-	assert(map - (char *)vmap == bsize);
+	assert((uint32_t)(map - (char *)vmap) == bsize);
 	vkUnmapMemory(dev, span.buffer->memory);
 
 	vkCmdCopyBufferToImage(cb, span.buffer->buffer, texture->image,
