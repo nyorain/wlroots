@@ -294,7 +294,7 @@ struct wlr_vk_buffer_span vulkan_get_stage_span(struct wlr_vk_renderer *r,
 		goto error;
 	}
 
-	wlr_log(WLR_DEBUG, "Created new vk staging buffer of size %lu", bsize);
+	wlr_log(WLR_DEBUG, "Created new vk staging buffer of size %" PRIu64, bsize);
 	buf->buf_size = bsize;
 	wl_list_insert(&r->stage.buffers, &buf->link);
 
